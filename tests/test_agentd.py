@@ -69,3 +69,74 @@ def test_shell_timeout_kills_process_group(agent, tmp_path, monkeypatch):
                     await proc.communicate()
 
     asyncio.run(run())
+
+
+def test_conversations_do_not_share_history(agent):
+    from unittest.mock import AsyncMock
+
+    requests = []
+    async def chat(messages, tools):
+        requests.append([dict(m) for m in messages])
+        return {"choices": [{"message": {"content": "reply"}}]}
+
+    agent.llm_chat = chat
+    agent.NC = AsyncMock()
+    async def run():
+        for mid, conv, text in [("root", None, "private alpha"), ("other", None, "private beta"), ("follow", "root", "alpha followup")]:
+            env = {"msg_id": mid, "src": "user", "ch": "in.a", "kind": "text", "body": {"text": text}}
+            if conv:
+                env["conv"] = conv
+            await agent.handle_envelope(env, "orc.g.in.a", True)
+        await asyncio.sleep(0)
+
+    asyncio.run(run())
+    assert "private alpha" not in json.dumps(requests[1])
+    assert "private beta" not in json.dumps(requests[2])
+    assert "private alpha" in json.dumps(requests[2])
+    replies = [json.loads(call.args[1]) for call in agent.NC.publish.call_args_list]
+    assert [r["conv"] for r in replies] == ["root", "other", "root"]
+    assert [r["prev"] for r in replies] == ["root", "other", "follow"]
+
+
+def test_conversation_history_is_bounded_and_lru(agent):
+    from unittest.mock import AsyncMock
+
+    agent.NC = AsyncMock()
+    agent.llm_chat = AsyncMock(return_value={"choices": [{"message": {"content": ""}}]})
+    async def turn(conv, text):
+        await agent.handle_envelope({"conv": conv, "msg_id": text, "body": {"text": text}}, "", True)
+
+    async def run():
+        for i in range(50):
+            await turn(str(i), f"seed-{i}")
+        await turn("0", "refresh")
+        await turn("new", "new")
+        assert "0" in agent.HISTORY and "1" not in agent.HISTORY
+        assert len(agent.HISTORY) == 50
+        for i in range(agent.HISTORY_MAX):
+            await turn("0", f"later-{i}")
+        messages = agent.llm_chat.call_args.args[0]
+        assert "seed-0" not in json.dumps(messages)
+        assert len(agent.HISTORY["0"]) <= agent.HISTORY_MAX
+
+    asyncio.run(run())
+
+
+def test_tool_send_propagates_conversation_on_all_routes(agent):
+    from unittest.mock import AsyncMock
+
+    agent.NC = AsyncMock()
+    agent.OUT_BY_ID = {"c": {"id": "c", "to": "b", "kinds": ["text"]}}
+    async def run():
+        for to, channel in [("user", "out"), ("b", "c")]:
+            result = await agent.tool_send(
+                {"to": to, "channel_id": channel, "kind": "text", "body": {"text": "hello"}},
+                {"conv": "root", "prev": "parent"},
+            )
+            assert json.loads(result)["ok"]
+
+    asyncio.run(run())
+    for call in agent.NC.publish.call_args_list:
+        message = json.loads(call.args[1])
+        assert message["conv"] == "root"
+        assert message["prev"] == "parent"

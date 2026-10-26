@@ -24,7 +24,7 @@ import sys
 import threading
 import time
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -35,6 +35,7 @@ KNOWN_KINDS = ("text", "artifact", "result")
 USER_KINDS = ("text", "artifact", "result")
 MAX_TOOL_CALLS = 8
 HISTORY_MAX = 20
+CONVERSATIONS_MAX = 50
 SHELL_TIMEOUT = 60
 SHELL_CAPTURE = 8192
 
@@ -57,7 +58,7 @@ VISION_API_KEY = ""
 VISION_MODEL = ""
 
 NC = None
-HISTORY = deque()
+HISTORY = OrderedDict()
 
 
 def env(name, default=None):
@@ -317,7 +318,8 @@ async def tool_send(args, sent):
         "ch": ch_field,
         "kind": kind,
         "body": body,
-        "prev": None,
+        "prev": sent["prev"],
+        "conv": sent["conv"],
     }
     data = json.dumps(envelope, ensure_ascii=False).encode()
     if max_bytes is not None and len(data) > max_bytes:
@@ -617,12 +619,7 @@ def format_incoming(envelope):
     )
 
 
-def trim_history():
-    while len(HISTORY) > HISTORY_MAX:
-        HISTORY.popleft()
-
-
-def publish_out(text, prev_msg_id):
+def publish_out(text, prev_msg_id, conv):
     envelope = {
         "v": 1,
         "msg_id": str(uuid.uuid4()),
@@ -632,6 +629,7 @@ def publish_out(text, prev_msg_id):
         "kind": "text",
         "body": {"text": text},
         "prev": prev_msg_id,
+        "conv": conv,
     }
     subject = f"orc.{GRAPH}.out.{AGENT_ID}"
     asyncio.ensure_future(NC.publish(subject, json.dumps(envelope, ensure_ascii=False).encode()))
@@ -639,13 +637,19 @@ def publish_out(text, prev_msg_id):
 
 
 async def handle_envelope(envelope, subject, trigger_is_in):
-    HISTORY.append({"role": "user", "content": format_incoming(envelope)})
-    trim_history()
+    conv = envelope.get("conv") or envelope.get("msg_id") or str(uuid.uuid4())
+    history = HISTORY.pop(conv, None)
+    if history is None:
+        history = deque(maxlen=HISTORY_MAX)
+    HISTORY[conv] = history
+    while len(HISTORY) > CONVERSATIONS_MAX:
+        HISTORY.popitem(last=False)
+    history.append({"role": "user", "content": format_incoming(envelope)})
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages.extend(HISTORY)
+    messages.extend(history)
 
     tools = build_tools()
-    sent = {"user": False, "any": False}
+    sent = {"user": False, "any": False, "conv": conv, "prev": envelope.get("msg_id")}
     final_text = ""
     try:
         for _ in range(MAX_TOOL_CALLS):
@@ -671,8 +675,7 @@ async def handle_envelope(envelope, subject, trigger_is_in):
             else:
                 final_text = content
                 messages.append({"role": "assistant", "content": content})
-                HISTORY.append({"role": "assistant", "content": content})
-                trim_history()
+                history.append({"role": "assistant", "content": content})
                 break
     except Exception as e:
         log_llm_error(subject, e)
@@ -681,7 +684,7 @@ async def handle_envelope(envelope, subject, trigger_is_in):
     if not sent["any"] and final_text.strip():
         # The model answered in plain text without using send. Route the reply
         # to the operator rather than dropping it silently.
-        publish_out(final_text, envelope.get("msg_id"))
+        publish_out(final_text, envelope.get("msg_id"), conv)
 
 
 def validate_envelope(data):
@@ -700,6 +703,8 @@ def validate_envelope(data):
     if envelope.get("kind") not in KNOWN_KINDS:
         return None
     if not isinstance(envelope.get("body"), dict):
+        return None
+    if "conv" in envelope and (not isinstance(envelope["conv"], str) or not envelope["conv"]):
         return None
     return envelope
 

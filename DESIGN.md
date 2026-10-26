@@ -53,12 +53,16 @@ conversation is two arrows, two channels.
 ```json
 {"v":1, "msg_id":"<uuid4>", "ts":"<iso>", "src":"<agent-id>",
  "ch":"ch.c1 | in.researcher | out.researcher", "kind":"text|artifact|result",
- "body":{…}, "prev":null}
+ "body":{…}, "prev":null, "conv":"<root-msg-id>"}
 ```
 
 `body` is a free JSON object; `kind` names its shape for filters. Agentd validates the
 envelope against the channel's filter on publish (size, kind, rate) and re-validates on
 receive. The UI's user account may only publish `in.*` prompts.
+Replies and sends retain `conv`; messages without it start a conversation using their
+`msg_id`. Agent history is isolated per conversation: at most 50 recently used
+conversations, each retaining at most 20 messages.
+
 
 ### NATS subject layout (per graph, broker-enforced)
 
