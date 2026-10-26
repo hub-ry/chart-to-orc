@@ -694,8 +694,20 @@ async def handle_envelope(envelope, subject, trigger_is_in):
                 messages.append({"role": "assistant", "content": content})
                 history.append({"role": "assistant", "content": content})
                 break
+        else:
+            await tool_send(
+                {"to": "user", "channel_id": "out", "kind": "result",
+                 "body": {"ok": False, "error": "tool-call iteration limit exhausted"}},
+                sent,
+            )
+            return
     except Exception as e:
         log_llm_error(subject, e)
+        await tool_send(
+            {"to": "user", "channel_id": "out", "kind": "result",
+             "body": {"ok": False, "error": "LLM call failed"}},
+            sent,
+        )
         return
 
     if not sent["any"] and final_text.strip():

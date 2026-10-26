@@ -245,6 +245,18 @@ async def prompt_agent(name: str, aid: str, body: dict) -> dict:
     return {"ok": True, "msg_id": msg["msg_id"]}
 
 
+@app.get("/api/graphs/{name}/result")
+async def graph_result(name: str, timeout: float = 30, conv: str | None = None):
+    load_graph(name)
+    if not 0 <= timeout <= 300:
+        raise HTTPException(400, "timeout must be between 0 and 300 seconds")
+    try:
+        result = await fabric.wait_result(name, conv, timeout)
+    except asyncio.TimeoutError:
+        return JSONResponse({"status": "timeout"}, status_code=408)
+    return {"status": "result", "result": result}
+
+
 @app.get("/api/graphs/{name}/traffic")
 def traffic(name: str, after: int = 0) -> dict:
     p = graph_dir(name) / "traffic.jsonl"

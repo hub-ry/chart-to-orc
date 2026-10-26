@@ -121,6 +121,32 @@ Both call and runtime limits must be positive.
 Existing running containers retain their old environment until explicitly
 re-provisioned. This change does not alter running containers automatically.
 
+## Results and waiting
+
+Agents publish `kind: "result"` with `body: {"ok": false, "error": "..."}` on
+LLM failures or exhausted tool-call iterations. These retain `prev` and `conv`,
+increment `hops`, and obey the same hop limit as other sends.
+
+An optional graph-level `result_schema` object describes result bodies. The host
+uses a dependency-free JSON Schema subset: `type` (including type arrays),
+`required`, `properties`, `items`, `enum`, and `additionalProperties: false`.
+Other keywords are ignored; this is not a full JSON Schema implementation.
+Every agent receives the schema in its system prompt on provisioning.
+The observer validates only results on user-facing `out` subjects. Traffic keeps
+the original body with host-computed `valid` and, on failure, an `error` string.
+Runtime error bodies may themselves fail a graph's success-result schema.
+
+After POSTing a prompt, use its `msg_id` as `conv`:
+`GET /api/graphs/{name}/result?timeout=30&conv=<msg_id>`.
+HTTP 200 returns `{"status":"result","result":<flagged envelope>}`, including
+invalid results; callers must check `result.valid`. With no `conv`, it returns
+the latest observed result for that graph. Timeout returns HTTP 408 with
+`{"status":"timeout"}`. The default timeout is 30 seconds; accepted range is
+0–300 seconds (otherwise HTTP 400); zero checks already-cached results only.
+Waiting uses in-memory asyncio events, not disk polling. The most recent 100
+results per graph remain available, without consuming them on reads; restart,
+deletion and reaccept clear that cache. Historical traffic is not replayed.
+
 ## Message loop guard
 
 `ORC_MAX_HOPS` (default `8`, nonnegative) is passed to agent containers as

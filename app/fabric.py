@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import nats
 
-from app.schema import SLUG
+from app.schema import SLUG, result_error
 
 MAX_LOG_BYTES = 4_000_000
 
@@ -44,6 +46,42 @@ def append_bounded(path: Path, text: str) -> None:
 
 _connections: dict[str, object] = {}
 _observers: dict[str, asyncio.Task] = {}
+
+
+@dataclass
+class ResultState:
+    results: deque = field(default_factory=lambda: deque(maxlen=100))
+    changed: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+_results: dict[str, ResultState] = {}
+
+
+def observe_result(name: str, obj: dict, schema: dict | None) -> None:
+    """Called only for broker-observed results on a user-facing out subject."""
+    error = result_error(obj.get("body"), schema) if schema is not None else None
+    obj["valid"] = error is None
+    obj.pop("error", None)
+    if error:
+        obj["error"] = error
+    state = _results.setdefault(name, ResultState())
+    state.results.append(obj)
+    state.changed.set()
+    state.changed = asyncio.Event()
+
+
+async def wait_result(name: str, conv: str | None, timeout: float) -> dict:
+    state = _results.setdefault(name, ResultState())
+    for obj in reversed(state.results):
+        if conv is None or obj.get("conv") == conv:
+            return obj
+    async def matching():
+        while True:
+            for obj in reversed(state.results):
+                if conv is None or obj.get("conv") == conv:
+                    return obj
+            await state.changed.wait()
+    return await asyncio.wait_for(matching(), timeout)
 
 
 def _user_url(graph_dir: Path) -> str | None:
@@ -92,6 +130,8 @@ def _md_line(msg: dict) -> str | None:
 async def _persist(sub, graph_dir: Path, name: str, channel_senders: dict[str, str]) -> None:
     log = graph_dir / "traffic.jsonl"
     md_dir = graph_dir / "agents"
+    spec_path = graph_dir / "graph.json"
+    schema = json.loads(spec_path.read_text()).get("result_schema") if spec_path.is_file() else None
     while True:
         msg = await sub.next_msg(timeout=None)
         try:
@@ -111,6 +151,9 @@ async def _persist(sub, graph_dir: Path, name: str, channel_senders: dict[str, s
             elif parts[2] == "in":
                 src = "user"
         obj["src"] = src
+        if (len(parts) == 4 and parts[:3] == ["orc", name, "out"]
+                and SLUG.fullmatch(parts[3]) and obj.get("kind") == "result"):
+            observe_result(name, obj, schema)
         data = json.dumps(obj, ensure_ascii=False)
         try:
             append_bounded(log, data + "\n")
@@ -125,6 +168,9 @@ async def _persist(sub, graph_dir: Path, name: str, channel_senders: dict[str, s
 
 
 async def stop_observer(name: str) -> None:
+    state = _results.pop(name, None)
+    if state:
+        state.results.clear()
     task = _observers.pop(name, None)
     if task:
         task.cancel()

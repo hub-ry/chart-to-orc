@@ -20,6 +20,54 @@ KNOWN_TOOLS = ("workspace", "browser", "shell")
 KNOWN_KINDS = ("text", "artifact", "result")
 
 
+def result_error(body, schema: dict, path: str = "$") -> str | None:
+    """Validate the supported JSON Schema subset; return the first mismatch."""
+    types = {
+        "object": lambda v: isinstance(v, dict),
+        "array": lambda v: isinstance(v, list),
+        "string": lambda v: isinstance(v, str),
+        "integer": lambda v: type(v) is int or (type(v) is float and v.is_integer()),
+        "number": lambda v: type(v) in (int, float),
+        "boolean": lambda v: type(v) is bool,
+        "null": lambda v: v is None,
+    }
+    expected = schema.get("type")
+    if expected is not None:
+        allowed = expected if isinstance(expected, list) else [expected]
+        if not any(t in types and types[t](body) for t in allowed):
+            return f"{path}: expected {expected}"
+    if "enum" in schema:
+        # JSON booleans are distinct from numbers, unlike Python equality.
+        def equal(a, b):
+            if isinstance(a, bool) != isinstance(b, bool):
+                return False
+            if isinstance(a, dict) and isinstance(b, dict):
+                return a.keys() == b.keys() and all(equal(a[k], b[k]) for k in a)
+            if isinstance(a, list) and isinstance(b, list):
+                return len(a) == len(b) and all(equal(x, y) for x, y in zip(a, b))
+            return a == b
+        if not any(equal(body, value) for value in schema["enum"]):
+            return f"{path}: value is not in enum"
+    if isinstance(body, dict):
+        for key in schema.get("required", []):
+            if key not in body:
+                return f"{path}: missing required property {key}"
+        properties = schema.get("properties", {})
+        for key, value in body.items():
+            if key in properties:
+                error = result_error(value, properties[key], f"{path}.{key}")
+                if error:
+                    return error
+            elif schema.get("additionalProperties") is False:
+                return f"{path}: unexpected property {key}"
+    if isinstance(body, list) and isinstance(schema.get("items"), dict):
+        for i, value in enumerate(body):
+            error = result_error(value, schema["items"], f"{path}[{i}]")
+            if error:
+                return error
+    return None
+
+
 class Agent(BaseModel):
     id: str
     name: str = ""
@@ -86,6 +134,7 @@ class Graph(BaseModel):
     name: str = "graph"
     agents: list[Agent] = Field(min_length=1)
     channels: list[Channel] = []
+    result_schema: dict | None = None
 
     @field_validator("name")
     @classmethod

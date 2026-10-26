@@ -230,3 +230,38 @@ result validation/waiting, TTL and live-graph capacity features, not regressions
 All checks were offline; no containers, services, firewall, provider APIs or
 credential files were accessed. Existing history was preserved and each commit
 includes evals/history.jsonl.
+
+## Failure results, result schemas and waiting
+Agents now publish an error result when the tool-call iteration budget runs out
+or the LLM fails, instead of silently ending the turn. Errors use short fixed
+reasons, retain parent/conversation metadata, and increment hops through the same
+hop-limited send path as other messages.
+
+Graphs may set a graph-level result_schema object, included in every agent's
+system prompt on provisioning. Host observation validates user-facing result
+bodies with a small dependency-free validator: type, required, properties,
+items, enum and additionalProperties:false. Other JSON Schema keywords are
+ignored. Invalid bodies stay in traffic and in wait responses with valid:false
+and an error; valid bodies get valid:true. No new environment variables.
+
+GET /api/graphs/{name}/result accepts optional conv and timeout (default 30,
+range 0–300 seconds). It returns HTTP 200 with status:result and the flagged
+envelope, or HTTP 408 with status:timeout. Asyncio events wake concurrent
+waiters; no disk polling. A non-consuming cache keeps the latest 100 results per
+graph, cleared on restart, deletion or reaccept. Zero timeout checks the cache.
+
+The old future-facing eval contract incorrectly assumed per-agent schemas,
+POST prompt waiting, result_valid and HTTP 422/504. Updated those probes to the
+requested graph-level schema, separate GET endpoint, valid flag and documented
+HTTP 200/408 semantics. No cases removed; invalid-result probes additionally
+require a validation error. Historical score rows were preserved.
+
+Eval score before -> after: 32/43 (74.42%) -> 39/43 (90.70%).
+Intermediate failure-result change: 34/43 (79.07%). All 173 tests pass; the
+existing Starlette/httpx deprecation warning remains. Offline cases cover
+iteration exhaustion, LLM failure, schema boundaries, concurrent waiting,
+conversation/channel isolation, cached results and timeout. An in-process smoke
+ran an actual ASGI prompt through the agent with a failing mock LLM, fake broker
+and real observer: HTTP 200 result, valid:true, preserved lineage, hop 1, and
+HTTP 408 for an absent conversation. No provider requests, services or containers
+were used. Remaining eval failures are TTL and graph capacity, outside this task.

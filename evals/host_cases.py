@@ -1,11 +1,10 @@
 """Offline host/API probes; every provision command is captured, never executed.
 
 Future-facing assumptions (10–13), deliberately small and explicit:
-* Agent.result_schema is JSON Schema for a result envelope's body. The observer
-  persists result_valid: bool alongside that envelope, including invalid results.
-* POST .../prompt accepts wait_for_result=true and timeout_seconds. It waits on
-  observer-persisted traffic for the prompt conversation: 200 + result envelope
-  for a valid result, 422 + flagged result for an invalid one, 504 on timeout.
+* Graph.result_schema is JSON Schema for a result envelope's body. The observer
+  persists valid: bool alongside that envelope, including invalid results.
+* GET .../result?conv=<prompt id>&timeout=<seconds> waits on observer events:
+  200 + flagged result envelope (including invalid results), 408 on timeout.
 * cleanup_expired_graphs(cfg) is a public one-shot sync/async cleanup hook;
   cfg.graph_ttl_seconds ages live graphs from status.provisioned_at; zero disables.
 * cfg.max_live_graphs limits admission at /accept, not drafts or reaccepting live
@@ -279,10 +278,8 @@ _RESULT_SCHEMA = {"type": "object", "properties": {"answer": {"type": "integer"}
 
 
 def _result_graph():
-    from app.schema import Agent, Graph
-    if "result_schema" not in Agent.model_fields:
-        raise NotImplementedError("not implemented")
-    return Graph(name="g", agents=[{"id": "a", "result_schema": _RESULT_SCHEMA}], channels=[])
+    from app.schema import Graph
+    return Graph(name="g", agents=[{"id": "a"}], channels=[], result_schema=_RESULT_SCHEMA)
 
 
 async def _result_flag(ctx, valid):
@@ -295,8 +292,10 @@ async def _result_flag(ctx, valid):
     async with _client(main.app, cfg.api_token) as client:
         response = await client.get("/api/graphs/g/traffic")
     rows = response.json()["lines"]
-    ctx.require(len(rows) == 1 and rows[0].get("result_valid") is valid,
+    ctx.require(len(rows) == 1 and rows[0].get("valid") is valid,
                 "observer must preserve and explicitly flag result schema validity")
+    if not valid:
+        ctx.require(bool(rows[0].get("error")), "invalid results must explain validation failure")
     ctx.require(rows[0]["body"] == body, "result validation altered/discarded the result body")
 
 
@@ -311,10 +310,8 @@ async def result_invalid_flag(ctx):
 async def _wait_result(ctx, outcome):
     main, cfg = _main(ctx)
     directory = _seed(ctx, _graph(agents=("a",)))
-    # Keep waiting probes independent of whether Agent currently retains schemas.
-    # The persisted schema is the proposed consumer contract, not a fake validator.
     stored = json.loads((directory / "graph.json").read_text())
-    stored["agents"][0]["result_schema"] = _RESULT_SCHEMA
+    stored["result_schema"] = _RESULT_SCHEMA
     (directory / "graph.json").write_text(json.dumps(stored))
     sent = []
 
@@ -330,20 +327,18 @@ async def _wait_result(ctx, outcome):
         return SimpleNamespace(publish=publish)
     ctx.patch("app.fabric.get_conn", connection)
     async with _client(main.app, cfg.api_token) as client:
-        response = await client.post("/api/graphs/g/agents/a/prompt", json={
-            "prompt": "return an answer", "wait_for_result": True, "timeout_seconds": .01,
-        })
-    if (response.status_code == 200 and response.json().get("ok") is True
-            and "result" not in response.json()):
-        # The wait flag returned only an immediate acknowledgement, not a result.
-        raise NotImplementedError("not implemented")
+        prompt = await client.post("/api/graphs/g/agents/a/prompt", json={"prompt": "return an answer"})
+        response = await client.get("/api/graphs/g/result",
+            params={"conv": prompt.json()["msg_id"], "timeout": .01})
     ctx.require(len(sent) == 1 and sent[0][0] == "orc.g.in.a", "wait must publish exactly one ordinary prompt")
-    expected = {"valid": 200, "invalid": 422, "timeout": 504}[outcome]
+    expected = {"valid": 200, "invalid": 200, "timeout": 408}[outcome]
     ctx.require(response.status_code == expected, f"wait-for-result {outcome}: expected HTTP{expected}")
     if outcome != "timeout":
         result = response.json().get("result", {})
-        ctx.require(result.get("kind") == "result" and result.get("result_valid") is (outcome == "valid"),
+        ctx.require(result.get("kind") == "result" and result.get("valid") is (outcome == "valid"),
                     "wait must return the flagged result envelope")
+        if outcome == "invalid":
+            ctx.require(bool(result.get("error")), "invalid wait result must explain validation failure")
         ctx.require(result.get("conv") == sent[0][1]["conv"], "wait returned another conversation's result")
 
 
@@ -505,8 +500,8 @@ CASES = [
     ("10", "valid result body is explicitly flagged valid", result_valid_flag),
     ("10", "invalid result body is retained and flagged invalid", result_invalid_flag),
     ("10", "wait-for-result returns matching valid envelope", wait_valid_result),
-    ("10", "wait-for-result rejects a matching invalid result", wait_invalid_result),
-    ("10", "wait-for-result returns HTTP504 on timeout", wait_result_timeout),
+    ("10", "wait-for-result retains and flags a matching invalid result", wait_invalid_result),
+    ("10", "wait-for-result returns HTTP408 on timeout", wait_result_timeout),
     ("11", "TTL removes expired graph and Docker resources", ttl_expired),
     ("11", "TTL preserves fresh live graph", ttl_fresh),
     ("11", "zero TTL disables cleanup", ttl_disabled),

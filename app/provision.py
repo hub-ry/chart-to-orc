@@ -194,7 +194,11 @@ def _start(
             "AGENT_ID": a.id,
             "AGENT_NAME": a.name or a.id,
             "GRAPH": graph.name,
-            "SYSTEM": a.system,
+            "SYSTEM": a.system + (
+                "\n\nResult bodies sent to the user must match this JSON Schema:\n"
+                + json.dumps(graph.result_schema, ensure_ascii=False)
+                if graph.result_schema is not None else ""
+            ),
             "TOOLS": ",".join(a.tools),
             "NATS_URL": f"nats://{agent_user}:{passwords[agent_user]}@nats:4222",
             "OUT_CHANNELS": json.dumps(out_ch),
