@@ -11,3 +11,9 @@ The observer derives senders from the NATS subject and the graph's channel sourc
 
 ## Conversation memory
 History is now per conversation, with a 50-conversation LRU and the existing 20-message limit per conversation. Prompts start a conv from their message id; automatic replies and send-tool messages retain it and link prev to the triggering message. Missing conv defaults to the incoming message id. Offline tests cover isolation, continuation, eviction, length limits, and both send routes. No new environment variables.
+
+## Route paths, traffic reads, and upstream errors
+Graph names and agent ids use one route helper with the schema slug pattern and return 400 when invalid. Traffic reads at most the last 1 MiB per request and uses byte offsets as opaque after/next cursors; the web UI already passes next back unchanged. Partial rows wait for completion, and a cursor beyond a truncated log restarts from the tail. Unexpected LLM response payloads are limited to 300 characters in errors. Offline TestClient and mocked-httpx tests cover these paths without loading the real config file. No new environment variables.
+
+## Offline verification
+The full suite passes: 71 tests. An in-process smoke run exercised an ASGI prompt, agent turns through mocked HTTP, broker messages, observer markdown and traffic polling, conversation isolation, invalid slug rejection, enabled/disabled shell calls, and a real local sleep timeout. No live services or provider APIs were used. Pytest reports one dependency deprecation warning from Starlette's httpx-based TestClient.

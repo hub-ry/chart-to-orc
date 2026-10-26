@@ -56,7 +56,7 @@ class LLM:
         try:
             content = data["choices"][0]["message"]["content"]
         except (KeyError, IndexError) as e:
-            raise LLMError(f"unexpected upstream payload: {data}") from e
+            raise LLMError(f"unexpected upstream payload: {str(data)[:300]}") from e
         if json_mode:
             try:
                 return json.loads(content)

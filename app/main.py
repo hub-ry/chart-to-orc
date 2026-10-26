@@ -21,7 +21,7 @@ from app.config import Config
 from app.llm import LLM
 from app.parser import ParseError, parse_drawing, parse_spec
 from app.provision import ProvisionError, provision, teardown
-from app.schema import Graph
+from app.schema import Graph, SLUG
 
 ROOT = Path(__file__).resolve().parent.parent
 cfg = Config.load()
@@ -48,11 +48,18 @@ app = FastAPI(title="chart-to-orc", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=ROOT / "web"), name="static")
 
 MAX_DRAWING_BYTES = 10 * 1024 * 1024
+TRAFFIC_READ_BYTES = 1024 * 1024
 MEDIA_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
 
 
+def validate_slug(value: str) -> str:
+    if not SLUG.fullmatch(value):
+        raise HTTPException(400, "invalid slug")
+    return value
+
+
 def graph_dir(name: str) -> Path:
-    return cfg.data_dir / name
+    return cfg.data_dir / validate_slug(name)
 
 
 def load_status(name: str) -> dict:
@@ -179,6 +186,7 @@ async def accept_graph(name: str) -> dict:
 
 @app.get("/api/graphs/{name}/agents/{aid}")
 def agent_file(name: str, aid: str) -> Response:
+    validate_slug(aid)
     load_graph(name)
     p = graph_dir(name) / "agents" / f"{aid}.md"
     if not p.is_file():
@@ -188,6 +196,7 @@ def agent_file(name: str, aid: str) -> Response:
 
 @app.post("/api/graphs/{name}/agents/{aid}/prompt")
 async def prompt_agent(name: str, aid: str, body: dict) -> dict:
+    validate_slug(aid)
     graph = load_graph(name)
     if aid not in {a["id"] for a in graph["agents"]}:
         raise HTTPException(404, "no such agent")
@@ -227,15 +236,26 @@ def traffic(name: str, after: int = 0) -> dict:
     p = graph_dir(name) / "traffic.jsonl"
     if not p.is_file():
         return {"lines": [], "next": 0}
-    lines = p.read_text().splitlines()
-    new = lines[after:]
+    # Cursors are byte offsets. Read only a bounded tail, skipping any cut row.
+    with p.open("rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        cursor = after if 0 <= after <= size else 0
+        start = max(cursor, size - TRAFFIC_READ_BYTES)
+        f.seek(start)
+        raw = f.read(min(TRAFFIC_READ_BYTES, size - start))
+    end = raw.rfind(b"\n") + 1
+    next_cursor = start + end
+    lines = raw[:end].splitlines()
+    if start > cursor:
+        lines = lines[1:]
     parsed = []
-    for line in new:
+    for line in lines:
         try:
             parsed.append(json.loads(line))
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             continue
-    return {"lines": parsed, "next": len(lines)}
+    return {"lines": parsed, "next": next_cursor}
 
 
 @app.delete("/api/graphs/{name}")
