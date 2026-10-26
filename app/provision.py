@@ -22,6 +22,8 @@ import time
 from pathlib import Path
 
 from app.schema import Graph
+from app.config import Config
+from app.proxy import graph_token
 
 
 class ProvisionError(RuntimeError):
@@ -60,10 +62,12 @@ def provision(
     agent_image: str,
     nats_image: str,
     build_dir: Path,
-    llm_env: dict[str, str],
+    cfg: Config,
 ) -> dict:
     d = data_dir / graph.name
     d.mkdir(parents=True, exist_ok=True)
+    token = graph_token(d, cfg)
+    proxy_url = f"http://host.docker.internal:{cfg.proxy_port}"
 
     _teardown_containers(graph)
 
@@ -129,16 +133,17 @@ def provision(
             "OUT_CHANNELS": json.dumps(out_ch),
             "IN_CHANNELS": json.dumps(in_ch),
             "WORKSPACE": "/workspace",
-            "LLM_BASE_URL": llm_env["base_url"],
-            "LLM_API_KEY": llm_env["api_key"],
-            "LLM_MODEL": llm_env["model"],
-            "VISION_BASE_URL": llm_env.get("vision_base_url") or llm_env["base_url"],
-            "VISION_API_KEY": llm_env.get("vision_api_key") or llm_env["api_key"],
-            "VISION_MODEL": llm_env.get("vision_model") or "",
+            "LLM_BASE_URL": proxy_url + "/llm",
+            "LLM_API_KEY": token,
+            "LLM_MODEL": cfg.llm_model,
+            "VISION_BASE_URL": proxy_url + "/vision",
+            "VISION_API_KEY": token,
+            "VISION_MODEL": cfg.vision_model,
         }
         args = [
             "docker", "run", "-d", "--name", f"orc-{graph.name}-{a.id}",
             "--network", f"orc-{graph.name}-{a.id}",
+            "--add-host", "host.docker.internal:host-gateway",
             "--memory", f"{a.memory_mb}m", "--cpus", str(a.cpus),
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "-v", f"orc-{graph.name}-{a.id}-ws:/workspace",

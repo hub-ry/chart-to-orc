@@ -9,7 +9,7 @@ Lives on hub, single user, tailnet-visible.
 1. Upload a drawing of a chart (photo/sketch of boxes + arrows) or paste a JSON spec.
 2. It compiles to a validated graph spec: agents, channels, filters. You review and accept.
 3. A one-shot orchestrator provisions: per-agent container + workspace + NATS credentials
-   scoped to exactly that agent's edges. Then the orchestrator is gone.
+   scoped to exactly that agent's edges. Provisioning ends; a host LLM proxy meters requests.
 4. Each agent appears as a markdown file. Click it, prompt it. Messages cross only the
    channels drawn, through the filters drawn. The UI shows the filtered traffic.
 
@@ -22,7 +22,7 @@ Lives on hub, single user, tailnet-visible.
 | P3 | blindness: no addressability | from agent A's container: DNS/IP of agent B unresolved; NATS publish to a subject outside its allow-list is refused by the broker (not by convention) |
 | P4 | blindness: no shared state | no shared volumes; the only file mounted per agent is its own workspace |
 | P5 | filtered traffic | prompt A via its markdown file → message appears on the drawn channel with filter applied; B's reply crosses only its own channel; UI live view shows exactly those messages |
-| P6 | orchestrator has no runtime role | after accept, no orchestrator process/container remains; agent creds were written once at provision time |
+| P6 | provisioner has no runtime role | provisioning ends after accept; a separate host proxy retains provider keys and meters graph tokens |
 | P7 | idempotent provision | re-running provision on the same graph converges (make-operations-idempotent) |
 
 ## Contracts (boundary-discipline)
@@ -88,12 +88,12 @@ blindness is a broker ACL, not an instruction to the agent.
   read-only creds. No host paths beyond its own data dir.
 - I4. The graph spec is never mounted into agent containers — each agent receives only its
   own slice (id, system, tools, subjects) as env/creds. It cannot read the graph file.
-- I5. The orchestrator is a one-shot process that exits after provisioning; it holds no
-  runtime credentials (they are generated inside the provision step and only handed to
-  agent containers).
-- I6. The only shared resource agents can see is the broker subjects listed above — that
-  is the filtered channel. Egress to the internet (the LLM API) is identical for
-  all agents and crosses no agent.
+- I5. Provisioning is one-shot. Provider credentials stay in the host app's separate
+  LLM proxy; agents receive only a graph-scoped bearer token and proxy endpoints.
+  The main API stays on loopback, outside the agent-facing listener.
+- I6. Agents communicate with peers only through broker subjects listed above.
+  The shared LLM proxy forwards independent requests without sharing agent history;
+  text and vision consume one persisted budget per graph.
 
 ## Design space (exhaust-the-design-space)
 
@@ -111,8 +111,8 @@ blindness is a broker ACL, not an instruction to the agent.
 - Repo: `~/chart-to-orc` (git). Data: `~/chart-to-orc/data/<graph>/{graph.json,status.json,drawing.*,agents/<id>.md}`.
 - Secrets: `~/.config/chart-to-orc/env` (chmod 600) — `DEEPSEEK_API_KEY`, optional
   `OPENAI_API_KEY` / `ORC_VISION_*` for the vision parser.
-- Serve: uvicorn on `0.0.0.0:8787` (tailnet-reachable), systemd user unit
-  `chart-to-orc.service` with `EnvironmentFile=~/.config/chart-to-orc/env`.
+- Serve: main uvicorn API on loopback `127.0.0.1:8787`, separate proxy on
+  `0.0.0.0:8788` by default. See README for bridge ingress and private UI access.
 - Agent brain: DeepSeek (`deepseek-chat`, OpenAI-compatible) — the key already present on
   hub for spons (`/etc/spons/environment`); copy into the chart-to-orc env file.
 

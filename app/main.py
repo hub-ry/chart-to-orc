@@ -22,6 +22,7 @@ from app.llm import LLM
 from app.parser import ParseError, parse_drawing, parse_spec
 from app.provision import ProvisionError, provision, teardown
 from app.schema import Graph, SLUG
+from app.proxy import running_proxy
 
 ROOT = Path(__file__).resolve().parent.parent
 cfg = Config.load()
@@ -29,19 +30,20 @@ cfg = Config.load()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # resume observing every live graph after a restart
-    if cfg.data_dir.is_dir():
-        for d in cfg.data_dir.iterdir():
-            if not d.is_dir():
-                continue
-            try:
-                status = json.loads((d / "status.json").read_text())
-                if status.get("state") == "live":
-                    graph = Graph.model_validate(json.loads((d / "graph.json").read_text()))
-                    await fabric.start_observer(d, d.name, {c.id: c.from_ for c in graph.channels})
-            except (OSError, json.JSONDecodeError, RuntimeError):
-                continue
-    yield
+    async with running_proxy(cfg):
+        # resume observing every live graph after a restart
+        if cfg.data_dir.is_dir():
+            for d in cfg.data_dir.iterdir():
+                if not d.is_dir():
+                    continue
+                try:
+                    status = json.loads((d / "status.json").read_text())
+                    if status.get("state") == "live":
+                        graph = Graph.model_validate(json.loads((d / "graph.json").read_text()))
+                        await fabric.start_observer(d, d.name, {c.id: c.from_ for c in graph.channels})
+                except (OSError, json.JSONDecodeError, RuntimeError):
+                    continue
+        yield
 
 
 app = FastAPI(title="chart-to-orc", lifespan=lifespan)
@@ -161,18 +163,10 @@ def get_graph(name: str) -> dict:
 async def accept_graph(name: str) -> dict:
     graph = Graph.model_validate(load_graph(name))
     await fabric.stop_observer(name)  # converge: restart cleanly if already live
-    llm_env = {
-        "base_url": cfg.llm_base_url,
-        "api_key": cfg.llm_api_key,
-        "model": cfg.llm_model,
-        "vision_base_url": cfg.vision_base_url,
-        "vision_api_key": cfg.vision_api_key,
-        "vision_model": cfg.vision_model,
-    }
     try:
         out = await asyncio.to_thread(
             provision, graph, cfg.data_dir, cfg.agent_image, cfg.nats_image,
-            ROOT / "agentd", llm_env,
+            ROOT / "agentd", cfg,
         )
     except ProvisionError as e:
         raise HTTPException(500, str(e))

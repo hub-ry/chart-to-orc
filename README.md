@@ -12,7 +12,7 @@ Architecture and contracts: [DESIGN.md](DESIGN.md).
 2. **Compile** — the app validates it into a graph spec: agents, channels, filters. You review it.
 3. **Accept** — a one-shot orchestrator provisions: per-agent bridge network + workspace
    volume + container, one NATS broker per graph with per-agent credentials scoped to
-   exactly the drawn edges. The orchestrator then has no runtime role.
+   exactly the drawn edges. A separate host-side LLM proxy meters agent requests.
 4. **Prompt** — every agent is a markdown file. Click it, prompt it. Messages cross only
    the drawn channels, through the drawn filters. The UI shows the live filtered traffic.
 
@@ -28,11 +28,52 @@ uv sync --extra dev          # first time
 # secrets: ~/.config/chart-to-orc/env (chmod 600)
 #   DEEPSEEK_API_KEY=...       agent brain + vision parser (deepseek-flash)
 #   ORC_LLM_BASE_URL / ORC_LLM_MODEL / ORC_VISION_*  overrides
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8787
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8787
 ```
 
-Open `http://hub:8787` (or the tailnet IP). Deploy as a service with
-`deploy/chart-to-orc.service` (`sudo cp` to `/etc/systemd/system/`, `systemctl enable --now`).
+Open `http://127.0.0.1:8787` locally or through a private tunnel. The supplied
+`deploy/chart-to-orc.service` also binds the main API to loopback.
+
+## Agent LLM proxy
+
+The main app starts a second, agent-only ASGI listener in the same process. Run
+**one uvicorn worker**: per-graph locks serialize text and vision calls, including
+budget checks and disk updates. The proxy has no UI, graph-management API, or
+static files. Agents receive a random graph token, never provider keys; both
+routes force the configured host-side models and reject streaming.
+
+| Environment variable | Default | Meaning |
+|---|---|---|
+| `ORC_PROXY_HOST` | `0.0.0.0` | Proxy bind address, reachable from agent bridges |
+| `ORC_PROXY_PORT` | `8788` | Dedicated proxy port |
+| `ORC_GRAPH_TOKEN_BUDGET` | `100000` | Combined input/output tokens per graph; `0` disables this cap |
+| `ORC_GRAPH_USD_BUDGET` | `1` | Estimated dollars per graph; `0` disables this cap |
+| `ORC_PRICE_IN_PER_M` | `1` | Estimated dollars per million input tokens |
+| `ORC_PRICE_OUT_PER_M` | `3` | Estimated dollars per million output tokens |
+
+At least one cap must be enabled. Prices are simple estimates shared by text and
+vision, not provider billing. Budgets/prices are captured at first provision.
+`proxy.json` in the graph data directory holds the token, caps, prices and usage
+with mode `0600`; re-provisioning and restarts preserve it. Deleting the graph
+removes it. Usage updates use atomic file replacement.
+
+Containers use `--add-host host.docker.internal:host-gateway` and
+`http://host.docker.internal:8788/llm` or `/vision` (port follows configuration).
+Restrict proxy ingress to local agent bridges with a host firewall; the default
+wildcard bind otherwise exposes this port on every host interface. Alternatively
+bind `ORC_PROXY_HOST` to the Docker host-gateway address (commonly `172.17.0.1`).
+Keep the **main API on loopback**, not `0.0.0.0` or the Docker gateway. For remote
+UI access use a private tunnel, or a dedicated private interface with firewall
+rules denying agent-bridge access. Proxy authentication does not protect the main API.
+
+The cap is checked before forwarding; one admitted request can exceed its remaining
+budget. The next request gets HTTP 429. Accounting relies on upstream `usage`;
+an otherwise successful response with missing/invalid usage closes the graph budget
+and returns 502. Failed/ambiguous network requests cannot be billed locally without
+reported usage. Upstream error bodies are limited to 300 characters.
+
+Existing running containers retain their old environment until explicitly
+re-provisioned. This change does not alter running containers automatically.
 
 ## Data
 

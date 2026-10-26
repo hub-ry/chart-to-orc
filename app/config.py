@@ -33,6 +33,12 @@ class Config:
     vision_model: str
     agent_image: str
     nats_image: str
+    proxy_host: str = "0.0.0.0"
+    proxy_port: int = 8788
+    graph_token_budget: int = 100_000
+    graph_usd_budget: float = 1.0
+    price_in_per_m: float = 1.0
+    price_out_per_m: float = 3.0
 
     @classmethod
     def load(cls, extra: dict[str, str] | None = None) -> "Config":
@@ -49,7 +55,7 @@ class Config:
         llm_model = get("ORC_LLM_MODEL", "deepseek-chat")
         return cls(
             data_dir=Path(get("ORC_DATA_DIR", str(Path.home() / "chart-to-orc" / "data"))).expanduser(),
-            host=get("ORC_HOST", "0.0.0.0"),
+            host=get("ORC_HOST", "127.0.0.1"),
             port=int(get("ORC_PORT", "8787")),
             llm_base_url=llm_base,
             llm_api_key=llm_key,
@@ -59,4 +65,10 @@ class Config:
             vision_model=get("ORC_VISION_MODEL", "deepseek-flash"),
             agent_image=get("ORC_AGENT_IMAGE", "chart-orc/agent:1"),
             nats_image=get("ORC_NATS_IMAGE", "nats:2.10-alpine"),
+            proxy_host=get("ORC_PROXY_HOST", "0.0.0.0"),
+            proxy_port=int(get("ORC_PROXY_PORT", "8788")),
+            graph_token_budget=int(get("ORC_GRAPH_TOKEN_BUDGET", "100000")),
+            graph_usd_budget=float(get("ORC_GRAPH_USD_BUDGET", "1")),
+            price_in_per_m=float(get("ORC_PRICE_IN_PER_M", "1")),
+            price_out_per_m=float(get("ORC_PRICE_OUT_PER_M", "3")),
         )
