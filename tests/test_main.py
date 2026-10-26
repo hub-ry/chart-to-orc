@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from dataclasses import replace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -93,3 +94,66 @@ def test_traffic_waits_for_complete_line(web_app):
         f.write(b'2}\n')
     second = client.get(f"/api/graphs/g/traffic?after={first['next']}").json()
     assert second["lines"] == [{"i": 2}]
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/graphs"),
+    ("POST", "/api/graphs"),
+    ("GET", "/api/graphs/g"),
+    ("POST", "/api/graphs/g/accept"),
+    ("GET", "/api/graphs/g/agents/a"),
+    ("POST", "/api/graphs/g/agents/a/prompt"),
+    ("GET", "/api/graphs/g/traffic"),
+    ("DELETE", "/api/graphs/g"),
+    ("GET", "/api/unknown"),
+    ("GET", "/api"),
+])
+@pytest.mark.parametrize("authorization", [None, "Bearer wrong", "Basic api-secret", "Bearer "])
+def test_api_requires_bearer_before_routing(web_app, monkeypatch, method, path, authorization):
+    monkeypatch.setattr(web_app, "cfg", replace(web_app.cfg, api_token="api-secret"))
+    client = TestClient(web_app.app)
+    response = client.request(
+        method, path,
+        headers={} if authorization is None else {"Authorization": authorization},
+    )
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert (web_app.cfg.data_dir / "g" / "graph.json").is_file()
+
+
+def test_api_accepts_token_but_not_graph_token(web_app, monkeypatch):
+    from app.proxy import graph_token
+
+    monkeypatch.setattr(web_app, "cfg", replace(web_app.cfg, api_token="api-secret"))
+    token = graph_token(web_app.cfg.data_dir / "g", web_app.cfg)
+    client = TestClient(web_app.app)
+    assert client.get("/api/graphs/g", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+    response = client.get("/api/graphs/g", headers={"Authorization": "Bearer api-secret"})
+    assert response.status_code == 200
+    assert response.json()["name"] == "g"
+
+
+@pytest.mark.parametrize("allow,expected", [(False, 401), (True, 200)])
+def test_api_without_token_fails_closed_unless_opted_out(web_app, monkeypatch, allow, expected):
+    monkeypatch.setattr(web_app, "cfg", replace(web_app.cfg, api_token="", allow_no_auth=allow))
+    client = TestClient(web_app.app)
+    assert client.get("/api/graphs").status_code == expected
+    assert client.get("/api/graphs", headers={"Authorization": "Bearer arbitrary"}).status_code == expected
+    assert client.get("/").status_code == 200
+    assert client.get("/static/app.js").status_code == 200
+    assert client.get("/health").status_code == 200
+
+
+@pytest.mark.parametrize("opt_out,expected", [("", 401), ("true", 401), ("1", 200)])
+def test_auth_environment_configuration(web_app, monkeypatch, opt_out, expected):
+    from app.config import Config
+
+    monkeypatch.setenv("ORC_API_TOKEN", "")
+    monkeypatch.setenv("ORC_ALLOW_NO_AUTH", opt_out)
+    monkeypatch.setattr(web_app, "cfg", Config.load({"ORC_DATA_DIR": str(web_app.cfg.data_dir)}))
+    client = TestClient(web_app.app)
+    assert client.get("/api/graphs/g").status_code == expected
+    monkeypatch.setenv("ORC_API_TOKEN", "configured-secret")
+    monkeypatch.setattr(web_app, "cfg", Config.load({"ORC_DATA_DIR": str(web_app.cfg.data_dir)}))
+    assert client.get("/api/graphs/g").status_code == 401
+    assert client.get("/api/graphs/g", headers={"Authorization": "Bearer configured-secret"}).status_code == 200

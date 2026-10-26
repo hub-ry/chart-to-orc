@@ -39,6 +39,19 @@ def test_token_auth(setup_proxy, authorization):
     assert response.status_code == 401
 
 
+@pytest.mark.parametrize("route", ["llm", "vision"])
+def test_proxy_rejects_api_token(setup_proxy, route):
+    cfg, _, _ = setup_proxy
+    cfg = replace(cfg, api_token="api-secret", allow_no_auth=True)
+    def unexpected(request):
+        pytest.fail("API token reached upstream")
+    response = client_for(cfg, unexpected).post(
+        f"/{route}/chat/completions", json={"messages": []},
+        headers={"Authorization": f"Bearer {cfg.api_token}"},
+    )
+    assert response.status_code == 401
+
+
 @pytest.mark.parametrize("budget", ["tokens", "usd"])
 def test_shared_budget_persisted_and_models_forced(setup_proxy, budget):
     cfg, directory, token = setup_proxy

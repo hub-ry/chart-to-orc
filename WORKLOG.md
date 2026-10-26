@@ -90,3 +90,26 @@ regressions now confirm it is dropped without a call. The full suite passes
 (112 tests). An agent-to-ASGI-proxy smoke with mocked upstream HTTP preserved
 parent/conversation/hop-8 lineage, refused at-limit tool and automatic sends,
 and dropped hop 9. The only warning is the existing Starlette/httpx deprecation.
+
+## API authentication and network isolation
+Every `/api/*` path now requires a constant-time checked bearer token from
+`ORC_API_TOKEN`. Without it, requests fail with 401 unless the new
+`ORC_ALLOW_NO_AUTH=1` explicitly opts out; a configured token takes precedence.
+Static UI files and health remain public. The UI prompts for a token, stores it
+in localStorage and sends it on API requests, preserving JSON and multipart
+headers. A 401 clears the saved token and tells the user to reload.
+
+Graph proxy tokens remain independent; offline regressions reject the API token
+on both proxy routes and graph tokens on the management API. Loopback defaults
+were already present in config, README and service launch and remain unchanged.
+README now documents auth setup, browser storage and example INPUT firewall
+rules for agent subnets, with the DOCKER-USER forwarding distinction.
+
+Offline verification: 124 focused API/proxy tests pass. An in-process ASGI smoke
+created, read and deleted a graph with auth and confirmed missing/wrong-token
+401s and bidirectional token separation. A real browser with intercepted offline
+responses exercised the prompt, token reuse after reload, authenticated GET/POST,
+multipart headers, public health and visible 401 recovery. No provider requests,
+listeners, firewall commands, containers or live services were used.
+Full suite: `.venv/bin/pytest -q` passes (160 tests); the existing
+Starlette/httpx TestClient deprecation warning remains.

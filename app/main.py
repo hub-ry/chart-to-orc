@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hmac
 import json
 import shutil
 import time
@@ -12,8 +13,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app import fabric
@@ -48,6 +49,25 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="chart-to-orc", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=ROOT / "web"), name="static")
+
+
+@app.middleware("http")
+async def authenticate_api(request: Request, call_next):
+    if request.url.path == "/api" or request.url.path.startswith("/api/"):
+        if cfg.api_token:
+            scheme, _, token = request.headers.get("authorization", "").partition(" ")
+            authorized = scheme.lower() == "bearer" and hmac.compare_digest(
+                token.encode(), cfg.api_token.encode()
+            )
+        else:
+            authorized = cfg.allow_no_auth
+        if not authorized:
+            return JSONResponse(
+                {"detail": "API authentication required"},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    return await call_next(request)
 
 MAX_DRAWING_BYTES = 10 * 1024 * 1024
 TRAFFIC_READ_BYTES = 1024 * 1024

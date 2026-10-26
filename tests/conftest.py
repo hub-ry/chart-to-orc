@@ -22,7 +22,9 @@ def web_app(monkeypatch, tmp_path):
     # app.main loads config on import; never open the real environment file.
     monkeypatch.setattr(config, "_load_env_file", lambda path: {})
     main = importlib.import_module("app.main")
-    monkeypatch.setattr(main, "cfg", replace(main.cfg, data_dir=tmp_path))
+    monkeypatch.setattr(main, "cfg", replace(
+        main.cfg, data_dir=tmp_path, api_token="", allow_no_auth=True
+    ))
     graph = tmp_path / "g"
     graph.mkdir()
     (graph / "graph.json").write_text('{"name":"g","agents":[{"id":"a"}],"channels":[]}')

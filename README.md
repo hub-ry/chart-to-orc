@@ -28,11 +28,43 @@ uv sync --extra dev          # first time
 # secrets: ~/.config/chart-to-orc/env (chmod 600)
 #   DEEPSEEK_API_KEY=...       agent brain + vision parser (deepseek-flash)
 #   ORC_LLM_BASE_URL / ORC_LLM_MODEL / ORC_VISION_*  overrides
+#   ORC_API_TOKEN=...         separate random token for API/UI access
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8787
 ```
 
 Open `http://127.0.0.1:8787` locally or through a private tunnel. The supplied
 `deploy/chart-to-orc.service` also binds the main API to loopback.
+
+## API authentication
+
+Set `ORC_API_TOKEN` to a separate random secret. Every `/api/*` request requires
+`Authorization: Bearer <token>`; missing or wrong credentials return 401.
+Without a token, the API refuses requests unless `ORC_ALLOW_NO_AUTH=1` explicitly
+enables unauthenticated local use. A configured token always takes precedence.
+The UI, static files and `/health` remain public.
+
+The UI prompts once and stores the token in this browser's localStorage for the
+current origin. A 401 clears it; reload to enter a replacement. Clear the
+`orc_api_token` localStorage entry to forget it manually. Use only a trusted
+browser and loopback/private tunnel, or HTTPS for remote access. The LLM proxy
+accepts only its own per-graph tokens, not this API token.
+
+## Network isolation
+
+`ORC_HOST` defaults to `127.0.0.1`; the uvicorn command and service explicitly
+bind loopback too (uvicorn CLI flags control the actual bind). Keep the API there.
+For every `orc-*` bridge subnet, block host access except TCP proxy port `8788`
+(adjust to `ORC_PROXY_PORT`). Example policy, for an administrator to adapt:
+
+```bash
+iptables -I INPUT 1 -s <agent-subnet> -p tcp --dport 8788 -j ACCEPT
+iptables -I INPUT 2 -s <agent-subnet> -j DROP
+```
+
+Host-destined traffic uses `INPUT`, not Docker's forwarding-only `DOCKER-USER`.
+Put these before broader accepts; cover every agent subnet and IPv6 if enabled.
+Use `DOCKER-USER` as well if the API is ever forwarded to a container. Restrict
+proxy ingress on other interfaces separately; API auth is not a firewall.
 
 ## Agent LLM proxy
 

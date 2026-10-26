@@ -42,6 +42,8 @@ class Config:
     max_hops: int = 8
     graph_max_calls: int = 200
     graph_max_seconds: float = 1800
+    api_token: str = ""
+    allow_no_auth: bool = False
 
     @classmethod
     def load(cls, extra: dict[str, str] | None = None) -> "Config":
@@ -77,4 +79,6 @@ class Config:
             max_hops=int(get("ORC_MAX_HOPS", "8")),
             graph_max_calls=int(get("ORC_GRAPH_MAX_CALLS", "200")),
             graph_max_seconds=float(get("ORC_GRAPH_MAX_SECONDS", "1800")),
+            api_token=get("ORC_API_TOKEN"),
+            allow_no_auth=get("ORC_ALLOW_NO_AUTH") == "1",
         )

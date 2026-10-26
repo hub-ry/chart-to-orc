@@ -2,6 +2,23 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+let apiToken = localStorage.getItem("orc_api_token");
+if (apiToken === null) {
+  apiToken = prompt("API token (leave empty only if the server allows no auth):") || "";
+  localStorage.setItem("orc_api_token", apiToken);
+}
+
+async function apiFetch(url, options = {}) {
+  const headers = new Headers(options.headers);
+  if (apiToken) headers.set("Authorization", `Bearer ${apiToken}`);
+  const response = await fetch(url, { ...options, headers });
+  if (response.status === 401) {
+    localStorage.removeItem("orc_api_token");
+    throw new Error("API authentication failed. Reload to enter the token again.");
+  }
+  return response;
+}
+
 const state = { name: null, status: "pending", agentId: null };
 let pollTimer = null;
 let trafficNext = 0;
@@ -101,11 +118,11 @@ async function acceptGraph() {
   const btn = $("accept");
   btn.disabled = true;
   try {
-    const r = await fetch(`/api/graphs/${state.name}/accept`, { method: "POST" });
+    const r = await apiFetch(`/api/graphs/${state.name}/accept`, { method: "POST" });
     const body = await r.json().catch(() => ({}));
     if (!r.ok) return showDetailError(body.detail || `accept failed (${r.status})`);
     clearDetailError();
-    const g = await fetch(`/api/graphs/${state.name}`).then((x) => x.json());
+    const g = await apiFetch(`/api/graphs/${state.name}`).then((x) => x.json());
     renderDetail(g);
     listGraphs();
   } catch (e) { showDetailError(String(e)); }
@@ -117,7 +134,7 @@ async function deleteGraph() {
   const btn = $("delete");
   btn.disabled = true;
   try {
-    const r = await fetch(`/api/graphs/${state.name}`, { method: "DELETE" });
+    const r = await apiFetch(`/api/graphs/${state.name}`, { method: "DELETE" });
     const body = await r.json().catch(() => ({}));
     if (!r.ok) return showDetailError(body.detail || `delete failed (${r.status})`);
     closePanel();
@@ -154,7 +171,7 @@ async function loadMarkdown() {
   const view = $("md-view");
   view.textContent = "loading…";
   try {
-    const r = await fetch(`/api/graphs/${state.name}/agents/${state.agentId}`);
+    const r = await apiFetch(`/api/graphs/${state.name}/agents/${state.agentId}`);
     if (!r.ok) {
       const body = await r.json().catch(() => ({}));
       view.innerHTML = `<span class="error">${esc(body.detail || `failed (${r.status})`)}</span>`;
@@ -172,7 +189,7 @@ async function sendPrompt() {
   const btn = $("send-prompt");
   btn.disabled = true;
   try {
-    const r = await fetch(`/api/graphs/${state.name}/agents/${state.agentId}/prompt`, {
+    const r = await apiFetch(`/api/graphs/${state.name}/agents/${state.agentId}/prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt: text }),
@@ -195,7 +212,7 @@ async function sendPrompt() {
 async function pollTraffic() {
   if (!state.agentId) return;
   try {
-    const r = await fetch(`/api/graphs/${state.name}/traffic?after=${trafficNext}`);
+    const r = await apiFetch(`/api/graphs/${state.name}/traffic?after=${trafficNext}`);
     if (!state.agentId) return; // panel closed mid-poll
     if (!r.ok) {
       const body = await r.json().catch(() => ({}));
@@ -248,7 +265,7 @@ $("compile-drawing").addEventListener("click", async () => {
   fd.append("image", f);
   msg("parsing…");
   try {
-    const r = await fetch("/api/graphs", { method: "POST", body: fd });
+    const r = await apiFetch("/api/graphs", { method: "POST", body: fd });
     const body = await r.json().catch(() => ({}));
     if (!r.ok) return msg(body.detail || "failed", true);
     msg("compiled");
@@ -262,7 +279,7 @@ $("compile-spec").addEventListener("click", async () => {
   fd.append("spec", $("spec").value);
   msg("validating…");
   try {
-    const r = await fetch("/api/graphs", { method: "POST", body: fd });
+    const r = await apiFetch("/api/graphs", { method: "POST", body: fd });
     const body = await r.json().catch(() => ({}));
     if (!r.ok) return msg(body.detail || "failed", true);
     msg("compiled");
@@ -273,7 +290,7 @@ $("compile-spec").addEventListener("click", async () => {
 
 async function listGraphs() {
   try {
-    const r = await fetch("/api/graphs");
+    const r = await apiFetch("/api/graphs");
     const { graphs } = await r.json();
     $("graphs").innerHTML = graphs.map((g) =>
       `<li data-name="${esc(g.name)}">${esc(g.name)} <span class="muted">· ${g.agents} agents, ${g.channels} channels · ${g.status}</span></li>`).join("");
@@ -284,7 +301,7 @@ $("graphs").addEventListener("click", async (ev) => {
   const li = ev.target.closest("li");
   if (!li) return;
   try {
-    const r = await fetch(`/api/graphs/${li.dataset.name}`);
+    const r = await apiFetch(`/api/graphs/${li.dataset.name}`);
     const body = await r.json().catch(() => ({}));
     if (!r.ok) return msg(body.detail || `failed (${r.status})`, true);
     closePanel();
