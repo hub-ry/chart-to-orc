@@ -113,3 +113,25 @@ multipart headers, public health and visible 401 recovery. No provider requests,
 listeners, firewall commands, containers or live services were used.
 Full suite: `.venv/bin/pytest -q` passes (160 tests); the existing
 Starlette/httpx TestClient deprecation warning remains.
+
+## Offline hardening evals
+Added `.venv/bin/python -m evals [--label LABEL]`: 29 equally weighted,
+isolated offline cases covering fixes 1–14 and adversarial attempts A–D.
+The runner uses fake provider credentials, scripted LLM replies, mock HTTP,
+fake broker publishing and captured provisioning commands. Network access is
+blocked, provider config is not loaded, and only the shell probes start local
+processes. No production behavior changed and no new environment variables.
+
+The corrected `--label baseline` run passed 16/29 (55.17%), exiting 0.
+The 13 failures are all `not implemented`: failure results, result validation
+and waiting, TTL cleanup, graph capacity, provision rollback and removed-agent
+cleanup. Future-facing API/config assumptions are explicit in `evals/host_cases.py`.
+An initial 14/29 run exposed a harness-only timestamp bug: auth/routing fixtures
+looked expired to the proxy. That fixture is fixed; the initial run is retained
+alongside the corrected baseline in the append-only history.
+
+Verification: a second scorecard run (`--label repeatability`) produced the same
+16/29 and identical failed cases. Both completed with exit 0 and appended history.
+`.venv/bin/pytest -q` passed all 160 tests; the existing Starlette/httpx
+deprecation warning remains. No Docker commands, provider calls or live services
+were used.

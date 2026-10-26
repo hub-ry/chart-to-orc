@@ -145,6 +145,27 @@ runtime and environment.
 uv run pytest -q
 ```
 
+## Evals
+
+```bash
+.venv/bin/python -m evals --label baseline
+```
+
+The offline scorecard exercises real app and agent paths with scripted LLM replies,
+mock HTTP upstreams, fake NATS publishing and captured provisioning commands.
+It does not read provider config, contact services or run Docker. The shell timeout
+case starts and cleans up a local shell and child process in a temporary workspace.
+
+Each case has equal weight: score = passed / total × 100. Missing features count
+as `FAIL: not implemented`, not skips. Case failures still exit 0; harness errors
+exit nonzero. This measures these scenarios, not overall security or live network
+isolation. Future result/lifecycle contracts are documented in
+[`evals/host_cases.py`](evals/host_cases.py).
+
+Each run appends UTC time, commit, pre-run dirty state, optional label, score and
+failed case names to `evals/history.jsonl`. Commit the history when recording a
+baseline. Repeating the command should give the same outcomes for unchanged code.
+
 ## Status
 
 Working: spec/drawing → compile → validate; accept → provision; agent runtime (agentd)
