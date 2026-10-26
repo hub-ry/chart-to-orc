@@ -14,6 +14,7 @@ Environment (the interface):
 from __future__ import annotations
 
 import asyncio
+import codecs
 import concurrent.futures
 import json
 import os
@@ -142,6 +143,9 @@ def build_tools():
                 },
             },
         },
+    ]
+    if "workspace" in TOOLS_LIST:
+        tools += [
         {
             "type": "function",
             "function": {
@@ -394,20 +398,36 @@ async def tool_shell(args):
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
         )
-        out, errb = await asyncio.wait_for(proc.communicate(), timeout=SHELL_TIMEOUT)
+        async def capture(stream):
+            decoder = codecs.getincrementaldecoder("utf-8")("replace")
+            parts = []
+            remaining = SHELL_CAPTURE
+            while chunk := await stream.read(8192):
+                if remaining > 0:
+                    text = decoder.decode(chunk)[:remaining]
+                    parts.append(text)
+                    remaining -= len(text)
+            if remaining > 0:
+                parts.append(decoder.decode(b"", final=True)[:remaining])
+            return "".join(parts)
+
+        # Keep draining both pipes after retaining their bounded prefixes so
+        # verbose commands cannot deadlock or buffer unbounded output in memory.
+        completion = asyncio.gather(capture(proc.stdout), capture(proc.stderr), proc.wait())
+        out, errb, _ = await asyncio.wait_for(asyncio.shield(completion), timeout=SHELL_TIMEOUT)
     except asyncio.TimeoutError:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        await proc.communicate()
+        await completion
         return err(f"shell command timed out after {SHELL_TIMEOUT}s")
     except Exception as e:
         return err(str(e))
     result = {
         "exit_code": proc.returncode,
-        "stdout": out.decode("utf-8", "replace")[:SHELL_CAPTURE],
-        "stderr": errb.decode("utf-8", "replace")[:SHELL_CAPTURE],
+        "stdout": out,
+        "stderr": errb,
     }
     return tool_result(result)
 
@@ -572,6 +592,8 @@ async def vision_describe(image_b64: str, prompt: str) -> str:
 
 
 async def execute_tool(name, args, sent):
+    if name in {"read_file", "write_file", "list_files"} and "workspace" not in TOOLS_LIST:
+        return err("workspace tools are disabled")
     if name == "shell" and "shell" not in TOOLS_LIST:
         return err("shell tool is disabled")
     if name.startswith("browser_") and "browser" not in TOOLS_LIST:
@@ -719,6 +741,13 @@ def make_handler(subject, channel, trigger_is_in):
                 return
             if len(msg.data) > channel.get("max_bytes", 1 << 30):
                 return
+        # Broker ACLs bind this subscription to its configured sender; envelope
+        # identity fields are not authoritative. Hops remain cooperative metadata.
+        envelope["ch"] = subject.split(".", 2)[2]
+        if trigger_is_in:
+            envelope["src"] = "user"
+        elif channel is not None:
+            envelope["src"] = channel["from"]
         log("received", subject, envelope.get("msg_id"))
         await handle_envelope(envelope, subject, trigger_is_in)
 

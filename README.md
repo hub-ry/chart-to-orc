@@ -135,6 +135,21 @@ counts are treated as zero for older envelopes; invalid counts are logged and
 dropped. Existing containers need explicit re-provisioning to receive the new
 runtime and environment.
 
+Hop counts are cooperative loop metadata, not broker-attested security limits.
+An agent with shell access can publish directly using its own NATS credentials
+and forge/reset hops within its allowed subjects; proxy call/runtime caps remain
+the host-side spending backstop.
+
+## Shell and storage limits
+
+Only grant shell access to trusted workloads. Timeout cleanup kills the command's
+process group, not descendants that create a new session (`setsid`/double-fork).
+Commands may also leave background processes after a successful exit. Workspace
+volumes and container writable layers have no portable disk quota here; deploy
+on quota-managed storage if disk exhaustion is a concern. Budget exhaustion
+does not stop containers. Docker isolation is not a complete hostile-code sandbox.
+
+
 ## Data
 
 - `~/chart-to-orc/data/<graph>/` — `graph.json` (spec), `status.json`,

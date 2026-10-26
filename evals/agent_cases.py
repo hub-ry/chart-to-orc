@@ -215,6 +215,18 @@ async def adversarial_provider_isolation(ctx):
         return real_open(path, *args, **kwargs)
 
     a.open = safe_open
+    # Module globals shadow builtins in Python; prove this tripwire actually runs.
+    (Path(a.WORKSPACE) / "positive-control").write_text(key)
+    control = json.loads(a.tool_read_file({"path": "positive-control"}))
+    ctx.require(control.get("result") == key, "workspace fixture positive control must expose the fixture key")
+    real_resolve = a.resolve_path
+    try:
+        a.resolve_path = lambda path: path
+        control = json.loads(a.tool_read_file({"path": "/proc/self/environ"}))
+        ctx.require(control.get("result") == "LLM_API_KEY=" + key,
+                    "module open override must catch a vulnerable proc-environ read without reading real proc")
+    finally:
+        a.resolve_path = real_resolve
 
     async def unsafe_shell(args):
         return json.dumps({"stdout": key + " " + vision})
@@ -248,6 +260,10 @@ async def adversarial_provider_isolation(ctx):
     ctx.require(key not in observed and vision not in observed, "no fake provider credential may reach tool responses, model context, or outbound content")
     ctx.require(bool(a.NC.messages), "adversarial exfil send must actually execute using obtained tool responses")
     ctx.require(key not in commands and vision not in commands, "provider credentials must not enter captured container commands/env")
+    # Shell permission exposes container credentials, which must be graph tokens,
+    # not provider keys. Simulate /proc and env at the subprocess boundary.
+    from evals.review_agent import enabled_shell_environment
+    await enabled_shell_environment(ctx, key, vision)
 
 
 async def ping_pong(ctx):
@@ -303,3 +319,7 @@ CASES = [
     ("A", "adversarial_provider_key_isolation", adversarial_provider_isolation),
     ("C", "two_agent_ping_pong_stops_at_max_hops", ping_pong),
 ]
+
+from evals.review_agent import CASES as review_cases
+
+CASES += review_cases

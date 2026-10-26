@@ -4,7 +4,7 @@
 Shell is advertised and executed only with explicit shell permission. Browser calls are also refused when disabled, even if the model invents a call. Graph specs now accept shell as an explicit tool. Offline tests cover denied calls and an enabled local shell command. No new environment variables.
 
 ## Shell timeouts
-Each shell command starts its own process group. A timeout kills the whole group and drains/reaps the shell before returning an error, so child commands do not keep running. A local sleep regression verifies the shell and its child stop. No new environment variables.
+Each shell command starts its own process group. A timeout kills that group and reaps the shell before returning an error. The local sleep regression covers same-group children only: descendants that call setsid/double-fork can escape, and successful commands may leave background processes. No new environment variables.
 
 ## Observer identity and paths
 The observer derives senders from the NATS subject and the graph's channel sources, including after restart. User input subjects remain user messages. Markdown writes require a slug sender; message-body src cannot choose a path or impersonate another sender in the traffic log. Offline subscription tests cover spoofing, channels, input, and invalid subjects. No new environment variables.
@@ -150,3 +150,39 @@ Eval-first: new probes failed on oversized forwarding and accepted zero prices.
 Eval score before -> after: 16/31 (51.61%) -> 18/31 (58.06%); initial baseline
 16/29 (55.17%). All 160 tests passed. ASGI/mock-upstream probes exercised actual
 request rejection, completion clamping and credential creation without network I/O.
+
+### Finding dispositions and deployment boundaries
+- Grok 1: rejected automatic legacy-container shutdown/startup refusal as an operational migration policy outside this small fix; README already requires explicit re-provisioning and says old environments persist. No running containers inspected or changed.
+- Grok 3 / DeepSeek 1, 10: real shell/storage limitations, not a complete hostile-code sandbox. Corrected the false child-cleanup claim above and documented escaped sessions, successful background commands and unquota'd persistent storage. Portable disk quotas require an operator-selected filesystem/volume driver; tmpfs would silently remove persistence, and rootfs storage-opt does not quota named volumes. Complex subreapers/PDEATHSIG do not solve all descendants; rejected as out of scope.
+- Grok 4 / DeepSeek 3: verified private credential creation/repair needed; tracked in provisioning fix below.
+- Grok 5: receiver identity spoofing is real and fixed in agent work below; broker-attested hops are not available in this direct client-publish architecture. Documented cooperative hops; no fictitious unforgeable NATS header added.
+- Grok 6: verified traffic trim retained oversized byte totals and read whole files; markdown also unbounded. Fixed byte storage limits below. Client-side out-rate limits cannot constrain raw shell publishing; broker ingress/flood controls remain a deployment concern.
+- Grok 7 / DeepSeek 6: verified missing rollback and pending-delete cleanup; tracked in provisioning fix below.
+- Grok 8: verified workspace tools bypass permissions; tracked in agent fix below.
+- Grok 9: verified schema-invalid saved graph aborts startup; fixed below.
+- Grok 11 / DeepSeek 2: rejected the claim that module-global a.open cannot override builtin open: Python global lookup does use it. Disabled-shell probe intentionally tests denial, and captured provisioning args independently test provider-key exclusion. Strengthened positive controls/enabled-shell probe below; no host secret reads.
+- DeepSeek 5: verified removed-agent resource leak; tracked in provisioning fix below.
+- DeepSeek 7: rejected unverified backend compatibility request; fail-closed accounting intentionally rejects inconsistent totals, accepts missing total by summing components, and avoids trusting underreported usage. No provider-specific exception added.
+- DeepSeek 8: rejected token-cache infrastructure for a small private listener; absent tokens already reject before scans, and unknown nonempty tokens require lookup. Cache invalidation across delete/re-provision/restart adds state for an unmeasured scale concern.
+- DeepSeek 9: verified unbounded communicate buffering; tracked in agent fix below.
+- DeepSeek 11: rejected; UTF-8 encoding of Latin-1 header characters is valid. Offline raw-header GET with Bearer byte ff returned 401, not 500.
+
+No new environment variables for these documentation corrections. Each real fix
+has an eval-first score entry below; rejected findings do not change eval cases.
+
+### Agent permissions, identity and bounded shell capture
+Grok 8: workspace tool advertisement and dispatch now require workspace permission.
+Grok 5: normal receivers overwrite src/ch from their broker-bound subscription and
+configured sender before building model context; hops remain cooperative.
+DeepSeek 9: drain stdout/stderr concurrently in bounded chunks and retain only
+8192 decoded characters each, rather than buffering all output with communicate.
+Grok 11 / DeepSeek 2: added positive controls proving the simulated proc tripwire
+actually exposes fixture credentials if path resolution is bypassed, plus an
+enabled-shell probe of the captured container graph-token environment.
+No new environment variables.
+
+Eval-first: permissions, bounded capture and receiver identity all failed.
+Eval score before -> after (integrated tree): 20/43 (46.51%) -> 32/43 (74.42%).
+All 160 tests passed. Existing evals ran local printf and same-group timeout paths;
+a separate real local shell emitted 1,000,000 characters on each stream and
+returned exit 0 with exactly 8192 captured per stream. No real env/proc reads.
