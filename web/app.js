@@ -193,8 +193,10 @@ async function sendPrompt() {
 }
 
 async function pollTraffic() {
+  if (!state.agentId) return;
   try {
     const r = await fetch(`/api/graphs/${state.name}/traffic?after=${trafficNext}`);
+    if (!state.agentId) return; // panel closed mid-poll
     if (!r.ok) {
       const body = await r.json().catch(() => ({}));
       if (!$("traffic").children.length) {
@@ -206,6 +208,7 @@ async function pollTraffic() {
       trafficNext = data.next ?? trafficNext;
     }
   } catch (e) { /* transient; keep polling */ }
+  if (!state.agentId) return; // panel closed mid-poll
   pollTimer = setTimeout(pollTraffic, 2000);
 }
 

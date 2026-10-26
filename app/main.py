@@ -111,14 +111,14 @@ async def create_graph(
     if d.exists():
         raise HTTPException(409, f"graph {graph.name!r} already exists")
     d.mkdir(parents=True)
-    (d / "graph.json").write_text(graph.model_dump_json(indent=2))
+    (d / "graph.json").write_text(graph.model_dump_json(indent=2, by_alias=True))
     if drawing is not None:
         ext = MEDIA_EXT.get(media, ".png")
         (d / f"drawing{ext}").write_bytes(drawing)
     (d / "status.json").write_text(
         json.dumps({"state": "pending", "created": time.time()}, indent=2)
     )
-    return {**graph.model_dump(), "status": "pending"}
+    return {**graph.model_dump(by_alias=True), "status": "pending"}
 
 
 @app.get("/api/graphs")
@@ -193,7 +193,10 @@ async def prompt_agent(name: str, aid: str, body: dict) -> dict:
     if not text:
         raise HTTPException(400, "prompt is empty")
     d = graph_dir(name)
-    nc = await fabric.get_conn(d, name)
+    try:
+        nc = await fabric.get_conn(d, name)
+    except RuntimeError:
+        raise HTTPException(503, "graph has no observer credentials (provisioning incomplete?)")
     msg = {
         "v": 1,
         "msg_id": str(uuid.uuid4()),

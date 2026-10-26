@@ -13,7 +13,7 @@ import json
 import re
 import secrets
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 SLUG = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 KNOWN_TOOLS = ("workspace", "computer_use")
@@ -59,6 +59,8 @@ class Filter(BaseModel):
 
 
 class Channel(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str
     from_: str = Field(alias="from")
     to: str

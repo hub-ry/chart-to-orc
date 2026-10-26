@@ -88,6 +88,18 @@ def test_two_way_conversation_is_two_channels():
     assert len(g.channels) == 2
 
 
+def test_graph_roundtrip_through_json():
+    spec = two_agents()
+    g = Graph.model_validate(spec)
+    dumped = json.loads(g.model_dump_json(by_alias=True))
+    assert dumped["channels"][0]["from"] == "researcher"
+    again = Graph.model_validate(dumped)  # stored canonical JSON reparses
+    assert again.channels[0].from_ == "researcher"
+    legacy = two_agents()  # files written before the by_alias fix used from_
+    legacy["channels"][0]["from_"] = legacy["channels"][0].pop("from")
+    assert Graph.model_validate(legacy).channels[0].from_ == "researcher"
+
+
 def test_permissions_grant_exactly_the_drawn_edges():
     g = Graph.model_validate(two_agents())
     block, pw = g.nats_users()

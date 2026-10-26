@@ -25,3 +25,34 @@ ul#graphs { list-style:none; padding:0; margin:0; }
 ul#graphs li { padding:.3rem 0; border-bottom:1px solid var(--border); cursor:pointer; }
 ul#graphs li:last-child { border-bottom:none; }
 .error { color:#b3261e; }
+.badge { display:inline-block; padding:.05rem .5rem; border-radius:999px; font-size:.75rem; margin-left:.4rem; }
+.badge.pending { background:var(--border); color:var(--muted); }
+.badge.live { background:var(--accent); color:#fff; }
+button.danger { color:#b3261e; border-color:#b3261e; }
+.detail-head { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; }
+.detail-head .muted { flex:1 1 auto; }
+.agent.clickable { cursor:pointer; }
+.agent.clickable:hover { border-color:var(--accent); }
+.hint { margin-top:.2rem; font-size:.72rem; }
+.panel-head { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; }
+.panel-head button { margin-top:0; }
+.md-view { border:1px solid var(--border); border-radius:6px; padding:.7rem .9rem; margin-top:.6rem; font-size:.9rem; background:transparent; }
+.md-view h1, .md-view h2, .md-view h3 { margin:.4rem 0 .2rem; line-height:1.3; }
+.md-view h1 { font-size:1.1rem; }
+.md-view h2 { font-size:1rem; }
+.md-view h3 { font-size:.95rem; }
+.md-view p { margin:.4rem 0; }
+.md-view ul { margin:.3rem 0; padding-left:1.2rem; }
+.md-view code { font:12px/1.4 ui-monospace,monospace; background:var(--border); border-radius:4px; padding:.05rem .3rem; }
+.md-view pre { background:var(--border); border-radius:6px; padding:.6rem; overflow-x:auto; margin:.4rem 0; }
+.md-view pre code { background:transparent; padding:0; }
+.prompt-box { margin-top:.6rem; display:flex; gap:.5rem; align-items:flex-start; }
+.prompt-box textarea { flex:1 1 auto; margin-top:0; resize:vertical; }
+.prompt-box button { margin-top:0; }
+.traffic { margin-top:.8rem; }
+.traffic h3 { font-size:.9rem; margin:0 0 .3rem; }
+ul#traffic { list-style:none; padding:0; margin:0; max-height:340px; overflow-y:auto; }
+.traffic-line { padding:.35rem 0; border-bottom:1px solid var(--border); font-size:.85rem; }
+.traffic-line:last-child { border-bottom:none; }
+.traffic-line .kind { display:inline-block; background:var(--border); border-radius:4px; padding:0 .35rem; font-size:.72rem; margin-left:.4rem; }
+.traffic-line .body { font-family:ui-monospace,monospace; font-size:.75rem; word-break:break-word; }
