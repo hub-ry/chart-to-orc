@@ -378,3 +378,24 @@ Eval score before -> after: 43/43 (100.00%) -> 43/43 (100.00%).
 Final offline suite: 176 passed, one existing Starlette/httpx deprecation warning.
 All task commits include eval history. No deployment commands, real broker/Docker
 operations, secret files or provider calls were used.
+
+## Review end
+
+Baseline before changes: 43/43 (100.00%). Both review reports and the branch
+commits were checked against the code. All runs below are offline; no real
+credentials, provider endpoints, Docker, firewall or service operations used.
+
+### Failed accept and interrupted provisioning
+
+- Grok 5: real. Observer connection failure now tears down resources and records
+  failed status instead of leaving a live graph. The periodic collector also
+  removes provisioning interrupted more than five minutes ago, even with TTL off.
+  The lifecycle lock prevents collecting an accept still running in this process.
+  No new environment variables.
+
+Eval-first: both added lifecycle cases failed, 43/45 (95.56%). Eval score before
+-> after: 43/45 (95.56%) -> 54/54 (100.00%) in the integrated working tree,
+including independently added config/agent/proxy cases. Original 43 cases still
+pass. All 176 tests pass (one existing Starlette/httpx deprecation warning).
+ASGI accept and real cleanup code exercised captured Docker commands and status
+transitions; actual container cleanup was not run.

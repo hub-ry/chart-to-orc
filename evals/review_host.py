@@ -41,5 +41,49 @@ async def bounded_logs(ctx):
     ctx.require(rows[-1]['body']['text'] == 'x' * 300000, 'latest bounded traffic row missing')
 
 
+async def observer_failure_rollback(ctx):
+    from evals.host_cases import _capture_provision
+    main, cfg = _main(ctx)
+    directory = _seed(ctx, state="pending")
+    commands = _capture_provision(ctx, main)
+
+    async def fail(*args):
+        raise RuntimeError("offline broker refusal")
+
+    ctx.patch("app.fabric.start_observer", fail)
+    async with _client(main.app, cfg.api_token) as client:
+        response = await client.post("/api/graphs/g/accept")
+    ctx.require(response.status_code == 503, "observer failure must return 503")
+    ctx.require(json.loads((directory / "status.json").read_text())["state"] == "failed",
+                "observer failure leaves graph live")
+    last_run = max(i for i, args in enumerate(commands) if args[:3] == ("docker", "run", "-d"))
+    cleanup = commands[last_run + 1:]
+    ctx.require(any(args[:3] == ("docker", "rm", "-f") for args in cleanup)
+                and any(args[:3] == ("docker", "volume", "rm") for args in cleanup),
+                "observer failure leaves provisioned resources running")
+
+
+async def abandoned_provision_cleanup(ctx):
+    import os
+    import time
+    from evals.host_cases import _capture_provision
+    main, cfg = _main(ctx, graph_ttl_seconds=0)
+    old = _seed(ctx, _graph("old"), state="provisioning")
+    fresh = _seed(ctx, _graph("fresh"), state="provisioning")
+    status = old / "status.json"
+    status.write_text(json.dumps({"state": "provisioning"}))
+    os.utime(status, (time.time() - 600, time.time() - 600))
+    commands = _capture_provision(ctx, main)
+    await main.cleanup_expired_graphs(cfg)
+    ctx.require(json.loads(status.read_text())["state"] == "failed",
+                "abandoned provisioning is never collected when TTL is disabled")
+    ctx.require(json.loads((fresh / "status.json").read_text())["state"] == "provisioning",
+                "fresh provisioning was collected")
+    ctx.require(any("orc-old-a" in args for args in commands)
+                and not any("orc-fresh-a" in args for args in commands),
+                "abandoned provisioning cleanup targets wrong resources")
+
 CASES = [('mid', 'invalid_saved_graph_does_not_abort_startup', invalid_resume),
-         ('mid', 'observer_traffic_and_markdown_byte_caps', bounded_logs)]
+         ('mid', 'observer_traffic_and_markdown_byte_caps', bounded_logs),
+         ('end', 'observer_failure_rolls_back_resources', observer_failure_rollback),
+         ('end', 'abandoned_provisioning_is_collected_without_live_ttl', abandoned_provision_cleanup)]

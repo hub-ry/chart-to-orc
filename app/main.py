@@ -33,22 +33,30 @@ logger = logging.getLogger(__name__)
 
 
 async def cleanup_expired_graphs(config: Config) -> None:
-    """Expire live resources, retaining specs, logs and an explicit status."""
-    if config.graph_ttl_seconds <= 0 or not config.data_dir.is_dir():
+    """Expire live resources and recover provisioning abandoned by a crash."""
+    if not config.data_dir.is_dir():
         return
     async with _lifecycle_lock:
         for d in config.data_dir.iterdir():
             if not d.is_dir() or not SLUG.fullmatch(d.name):
                 continue
             try:
-                status = json.loads((d / "status.json").read_text())
-                if (status.get("state") != "live"
-                        or time.time() - status["provisioned_at"] <= config.graph_ttl_seconds):
+                status_path = d / "status.json"
+                status = json.loads(status_path.read_text())
+                abandoned = (status.get("state") == "provisioning"
+                             and time.time() - status_path.stat().st_mtime > 300)
+                expired = (status.get("state") == "live"
+                           and config.graph_ttl_seconds > 0
+                           and time.time() - status["provisioned_at"] > config.graph_ttl_seconds)
+                if not (abandoned or expired):
                     continue
                 graph = Graph.model_validate_json((d / "graph.json").read_text())
                 await fabric.stop_observer(d.name)
                 await asyncio.to_thread(teardown, graph, config.data_dir, rm_data=False)
-                status.update(state="expired", expired_at=time.time())
+                if abandoned:
+                    status.update(state="failed", error="provisioning interrupted")
+                else:
+                    status.update(state="expired", expired_at=time.time())
                 (d / "status.json").write_text(json.dumps(status, indent=2))
             except (OSError, ValueError, KeyError, TypeError, RuntimeError):
                 logger.exception("Graph cleanup failed for %s", d.name)
@@ -239,7 +247,12 @@ async def accept_graph(name: str) -> dict:
         try:
             await fabric.start_observer(d, name, {c.id: c.from_ for c in graph.channels})
         except RuntimeError as e:
-            raise HTTPException(503, f"provisioned, but observer cannot reach the broker yet: {e}")
+            await fabric.stop_observer(name)
+            await asyncio.to_thread(teardown, graph, cfg.data_dir, rm_data=False)
+            (d / "status.json").write_text(json.dumps({
+                "state": "failed", "error": "observer connection failed",
+            }))
+            raise HTTPException(503, "observer cannot reach the broker; graph resources removed")
         return {"status": "live", **out}
 
 

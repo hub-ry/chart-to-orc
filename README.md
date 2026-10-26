@@ -140,6 +140,10 @@ including their workspace volumes. Cleanup stops the observer and removes the
 containers, networks and volumes, then marks status `expired`. Specs and logs
 remain available; reaccept recreates resources. Exact TTL boundaries remain live.
 
+If the observer fails during accept, the new graph resources are torn down and
+status becomes `failed`. Crash-interrupted `provisioning` status older than five
+minutes is also cleaned up by the same periodic task, even when live TTL is disabled.
+
 ## Results and waiting
 
 Agents publish `kind: "result"` with `body: {"ok": false, "error": "..."}` on

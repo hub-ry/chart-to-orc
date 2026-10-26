@@ -31,3 +31,13 @@
 {"ts": "2026-10-26T04:51:10.365634+00:00", "commit": "11ebd79", "dirty": true, "label": "after-broker-limits", "passed": 43, "total": 43, "score": 100.0, "failed": []}
 {"ts": "2026-10-26T04:52:20.020446+00:00", "commit": "0436f45", "dirty": true, "label": "after-open-source", "passed": 43, "total": 43, "score": 100.0, "failed": []}
 {"ts": "2026-10-26T04:53:04.524981+00:00", "commit": "5597e32", "dirty": true, "label": "after-deployment-guide", "passed": 43, "total": 43, "score": 100.0, "failed": []}
+{"ts": "2026-10-26T04:53:16.268589+00:00", "commit": "681370f", "dirty": false, "label": "wrapper-after-6", "passed": 43, "total": 43, "score": 100.0, "failed": []}
+{"ts": "2026-10-26T04:53:18.171197+00:00", "commit": "681370f", "dirty": true, "label": "wrapper-before-review-end", "passed": 43, "total": 43, "score": 100.0, "failed": []}
+{"ts": "2026-10-26T05:10:40.588757+00:00", "commit": "681370f", "dirty": true, "label": "wrapper-after-review-end", "passed": 43, "total": 43, "score": 100.0, "failed": []}
+{"ts": "2026-10-26T05:10:42.541988+00:00", "commit": "681370f", "dirty": true, "label": "wrapper-before-fix-end", "passed": 43, "total": 43, "score": 100.0, "failed": []}
+{"ts": "2026-10-26T05:10:55.391861+00:00", "commit": "681370f", "dirty": true, "label": "before-review-end", "passed": 43, "total": 43, "score": 100.0, "failed": []}
+{"ts": "2026-10-26T05:12:18.389600+00:00", "commit": "681370f", "dirty": true, "label": "before-review-end-lifecycle", "passed": 43, "total": 45, "score": 95.55555555555556, "failed": ["observer_failure_rolls_back_resources", "abandoned_provisioning_is_collected_without_live_ttl"]}
+{"ts": "2026-10-26T05:13:15.358790+00:00", "commit": "681370f", "dirty": true, "label": "before-review-end-config", "passed": 47, "total": 51, "score": 92.15686274509804, "failed": ["review_shell_timeout_with_escaped_stderr_holder", "review_broker_connect_error_redacts_credentials", "config_process_overrides_conflicting_home", "config_public_env_refused_before_read"]}
+{"ts": "2026-10-26T05:13:55.789411+00:00", "commit": "681370f", "dirty": true, "label": "before-review-end-proxy", "passed": 51, "total": 54, "score": 94.44444444444444, "failed": ["ambiguous_upstream_failure_closes_persisted_budget", "proxy_requires_explicit_bind_address", "proxy_rejects_concurrent_worker_ownership"]}
+{"ts": "2026-10-26T05:14:24.939845+00:00", "commit": "681370f", "dirty": true, "label": "after-review-end-runtime", "passed": 54, "total": 54, "score": 100.0, "failed": []}
+{"ts": "2026-10-26T05:14:56.183273+00:00", "commit": "681370f", "dirty": true, "label": "after-review-end-lifecycle", "passed": 54, "total": 54, "score": 100.0, "failed": []}
