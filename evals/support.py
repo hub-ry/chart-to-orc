@@ -70,7 +70,7 @@ class Context:
 
     def config(self, **overrides):
         cfg = Config(
-            data_dir=self.path, host="127.0.0.1", port=8787,
+            data_dir=self.path,
             llm_base_url="https://text.invalid/v1", llm_api_key="fake-provider-key",
             llm_model="fixed-text", vision_base_url="https://vision.invalid/v1",
             vision_api_key="fake-vision-key", vision_model="fixed-vision",

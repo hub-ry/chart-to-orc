@@ -122,8 +122,8 @@ limit, so direct publishing can flood allowed subjects. Subject ACLs still apply
 - Repo: `~/chart-to-orc` (git). Data: `~/chart-to-orc/data/<graph>/{graph.json,status.json,drawing.*,agents/<id>.md}`.
 - Secrets: `~/.config/chart-to-orc/env` (chmod 600) — `DEEPSEEK_API_KEY`, optional
   `OPENAI_API_KEY` / `ORC_VISION_*` for the vision parser.
-- Serve: main uvicorn API on loopback `127.0.0.1:8787`, separate proxy on
-  `0.0.0.0:8788` by default. See README for bridge ingress and private UI access.
+- Serve: main uvicorn API on loopback `127.0.0.1:8787`, separate proxy on an
+  explicitly configured `ORC_PROXY_HOST:8788`. See README for gateway binding.
 - Agent brain: DeepSeek (`deepseek-chat`, OpenAI-compatible) by default.
   Configure your own provider key in the chart-to-orc env file.
 

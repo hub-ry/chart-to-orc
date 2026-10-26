@@ -1,4 +1,7 @@
-"""Config from env + ~/.config/chart-to-orc/env (chmod 600)."""
+"""Config precedence: private home env file < process env < explicit extras.
+
+~/.config/chart-to-orc/env must have no group/world permissions (0400 or 0600).
+"""
 
 from __future__ import annotations
 
@@ -11,6 +14,8 @@ def _load_env_file(path: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     if not path.is_file():
         return out
+    if path.stat().st_mode & 0o077:
+        raise PermissionError(f"Config env file must have no group/world permissions: {path}")
     for line in path.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -23,8 +28,6 @@ def _load_env_file(path: Path) -> dict[str, str]:
 @dataclass(frozen=True)
 class Config:
     data_dir: Path
-    host: str
-    port: int
     llm_base_url: str
     llm_api_key: str
     llm_model: str
@@ -33,7 +36,7 @@ class Config:
     vision_model: str
     agent_image: str
     nats_image: str
-    proxy_host: str = "0.0.0.0"
+    proxy_host: str = ""
     proxy_port: int = 8788
     graph_token_budget: int = 100_000
     graph_usd_budget: float = 1.0
@@ -49,8 +52,8 @@ class Config:
 
     @classmethod
     def load(cls, extra: dict[str, str] | None = None) -> "Config":
-        env = dict(os.environ)
-        env.update(_load_env_file(Path.home() / ".config" / "chart-to-orc" / "env"))
+        env = _load_env_file(Path.home() / ".config" / "chart-to-orc" / "env")
+        env.update(os.environ)
         if extra:
             env.update(extra)
 
@@ -62,8 +65,6 @@ class Config:
         llm_model = get("ORC_LLM_MODEL", "deepseek-chat")
         return cls(
             data_dir=Path(get("ORC_DATA_DIR", str(Path.home() / "chart-to-orc" / "data"))).expanduser(),
-            host=get("ORC_HOST", "127.0.0.1"),
-            port=int(get("ORC_PORT", "8787")),
             llm_base_url=llm_base,
             llm_api_key=llm_key,
             llm_model=llm_model,
@@ -72,7 +73,7 @@ class Config:
             vision_model=get("ORC_VISION_MODEL", "deepseek-flash"),
             agent_image=get("ORC_AGENT_IMAGE", "chart-orc/agent:1"),
             nats_image=get("ORC_NATS_IMAGE", "nats:2.10-alpine"),
-            proxy_host=get("ORC_PROXY_HOST", "0.0.0.0"),
+            proxy_host=get("ORC_PROXY_HOST"),
             proxy_port=int(get("ORC_PROXY_PORT", "8788")),
             graph_token_budget=int(get("ORC_GRAPH_TOKEN_BUDGET", "100000")),
             graph_usd_budget=float(get("ORC_GRAPH_USD_BUDGET", "1")),

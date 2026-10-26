@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import hmac
 import json
 import math
@@ -160,7 +161,12 @@ def create_proxy(cfg: Config, *, transport: httpx.AsyncBaseTransport | None = No
                 async with httpx.AsyncClient(timeout=120, transport=transport, trust_env=False) as client:
                     response = await client.post(base.rstrip("/") + "/chat/completions",
                                                  headers={"Authorization": f"Bearer {key}"}, json=payload)
-            except httpx.HTTPError:
+            except httpx.HTTPError as error:
+                # Connect/pool failures precede dispatch. Other transport failures
+                # may have lost a billable response; never guess zero usage.
+                if not isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+                    state["exhausted"] = True
+                    _save(path, state)
                 raise HTTPException(502, "upstream unavailable")
             try:
                 result = response.json()
@@ -202,17 +208,26 @@ class _ProxyServer(uvicorn.Server):
 
 @asynccontextmanager
 async def running_proxy(cfg: Config):
-    server = _ProxyServer(uvicorn.Config(create_proxy(cfg), lifespan="off", access_log=False))
-    with socket.create_server((cfg.proxy_host, cfg.proxy_port)) as listener:
-        listener.setblocking(False)
-        task = asyncio.create_task(server.serve(sockets=[listener]))
+    if not cfg.proxy_host:
+        raise ValueError("Set ORC_PROXY_HOST explicitly to the Docker host-gateway address")
+    cfg.data_dir.mkdir(parents=True, exist_ok=True)
+    # A second outer uvicorn worker must fail before starting its own listener.
+    with (cfg.data_dir / ".proxy.lock").open("a") as owner:
         try:
-            while not server.started:
-                if task.done():
-                    await task
-                    raise RuntimeError("proxy failed to start")
-                await asyncio.sleep(0.01)
-            yield
-        finally:
-            server.should_exit = True
-            await task
+            fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError("Run one uvicorn worker per data directory") from None
+        server = _ProxyServer(uvicorn.Config(create_proxy(cfg), lifespan="off", access_log=False))
+        with socket.create_server((cfg.proxy_host, cfg.proxy_port)) as listener:
+            listener.setblocking(False)
+            task = asyncio.create_task(server.serve(sockets=[listener]))
+            try:
+                while not server.started:
+                    if task.done():
+                        await task
+                        raise RuntimeError("proxy failed to start")
+                    await asyncio.sleep(0.01)
+                yield
+            finally:
+                server.should_exit = True
+                await task

@@ -327,7 +327,7 @@ New hardening environment variables across this branch:
 |---|---|---|
 | `ORC_API_TOKEN` | empty | Management API refuses requests until a token is configured or no-auth is explicitly allowed |
 | `ORC_ALLOW_NO_AUTH` | unset/false | Only `1` permits unauthenticated API use when no token is set |
-| `ORC_PROXY_HOST` | `0.0.0.0` | Agent-only proxy listener bind |
+| `ORC_PROXY_HOST` | required | Explicit agent-only proxy bind; unset/empty refuses startup |
 | `ORC_PROXY_PORT` | `8788` | Agent-only proxy listener port |
 | `ORC_GRAPH_TOKEN_BUDGET` | `100000` | Shared text/vision token budget; `0` disables |
 | `ORC_GRAPH_USD_BUDGET` | `1` | Shared estimated-dollar budget; `0` disables |
@@ -354,7 +354,7 @@ Operator steps (not executed during this task):
    in the private env file (0600). Keep TTL at zero unless removal of old live
    graphs and workspaces is intended. The supplied service reads
    `/etc/chart-to-orc/env`; interactive config additionally loads
-   `~/.config/chart-to-orc/env`, which overrides process env values. Avoid conflicts.
+   `~/.config/chart-to-orc/env` as defaults. Process environment wins.
 3. Adapt YOUR_USER/YOUR_GROUP and `/opt/chart-to-orc` paths in the service template,
    including the data path; give the service user access to that data directory.
    Reinstall the service file and reload the service manager's unit definitions.
@@ -415,3 +415,33 @@ The shell eval launches a real local setsid child, confirms bounded error return
 and kills its fixture child in finally; the broker refusal uses a mock exception.
 The eval runner labels the outer deadline TimeoutError as its generic safety
 timeout; the failing run finished in five seconds, not twenty.
+
+### Configuration and proxy fail-closed guards
+
+- Grok 1: real precedence bug. Process values now override the home env file;
+  explicit extra values still win. The suggested key-only process fixture would
+  not override a home base URL; evals use actual conflicting routes and keys.
+- Grok 8: real. Reject group/world-accessible home env files before reading;
+  private read-only 0400 is accepted alongside recommended 0600.
+- Grok 2 (bind) / DeepSeek 3: real unsafe wildcard default. Require an explicit
+  ORC_PROXY_HOST at startup; use the deployment's Docker gateway, not a guessed
+  universal address. Explicit wildcard remains an operator firewall decision.
+- Grok 4: real ambiguous billing path. Read/write/reset failures after possible
+  dispatch close the persisted budget; connect/pool failures cannot have sent a
+  request and remain retryable within the durable call cap. Usage is not invented.
+- DeepSeek 4: real single-worker assumption without enforcement. A nonblocking
+  kernel file lock held for the proxy lifespan rejects another worker sharing
+  its data directory before socket bind. No cross-worker accounting machinery.
+- DeepSeek 5: real dead config, removed host/port fields and ORC_HOST/ORC_PORT
+  loading. Uvicorn flags remain the only main bind control. No behavior eval for
+  dead-field deletion; existing API paths exercise all remaining constructors.
+
+No new environment variable names; ORC_PROXY_HOST is now required. README and
+deployment notes reflect that requirement and corrected precedence.
+Eval-first: config precedence/public-mode probes failed at 47/51 (92.16%);
+the first fixture run hit a read-only fixture rewrite error, fixed before the
+recorded complete gate without changing assertions. Three proxy probes then
+failed at 51/54 (94.44%). Eval score before -> after: 51/54 (94.44%) ->
+54/54 (100.00%). All 176 tests pass. Real temporary-file permission checks,
+kernel lock contention and ASGI/mock-upstream timeout/restart paths were
+exercised; no socket was opened and no live multiworker server was started.

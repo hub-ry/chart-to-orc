@@ -29,6 +29,7 @@ uv sync --extra dev          # first time
 #   DEEPSEEK_API_KEY=...       agent brain + vision parser (deepseek-flash)
 #   ORC_LLM_BASE_URL / ORC_LLM_MODEL / ORC_VISION_*  overrides
 #   ORC_API_TOKEN=...         separate random token for API/UI access
+#   ORC_PROXY_HOST=172.17.0.1  Docker host-gateway address; confirm for your setup
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8787
 ```
 
@@ -38,8 +39,9 @@ Open `http://127.0.0.1:8787` locally or through a private tunnel. The supplied
 For the service template, replace `YOUR_USER`/`YOUR_GROUP` and adapt the
 `/opt/chart-to-orc` paths before installing. It reads `/etc/chart-to-orc/env`
 and explicitly sets `ORC_DATA_DIR=/opt/chart-to-orc/data`; create that directory
-writable by the service user. Keep the env file private (0600). Interactive
-runs also load `~/.config/chart-to-orc/env`; avoid conflicting settings there.
+writable by the service user. Home env files must have no group/world permissions
+(0600 or read-only 0400); public files are refused before reading. Home settings
+are defaults: process environment wins, then explicit programmatic overrides.
 
 ## API authentication
 
@@ -57,8 +59,8 @@ accepts only its own per-graph tokens, not this API token.
 
 ## Network isolation
 
-`ORC_HOST` defaults to `127.0.0.1`; the uvicorn command and service explicitly
-bind loopback too (uvicorn CLI flags control the actual bind). Keep the API there.
+The uvicorn command and service explicitly bind `127.0.0.1`. Uvicorn CLI flags
+control the main API bind; `ORC_HOST`/`ORC_PORT` are not application settings.
 For every `orc-*` bridge subnet, block host access except TCP proxy port `8788`
 (adjust to `ORC_PROXY_PORT`). Example policy, for an administrator to adapt:
 
@@ -76,13 +78,14 @@ proxy ingress on other interfaces separately; API auth is not a firewall.
 
 The main app starts a second, agent-only ASGI listener in the same process. Run
 **one uvicorn worker**: per-graph locks serialize text and vision calls, including
-budget checks and disk updates. The proxy has no UI, graph-management API, or
+budget checks and disk updates. A lifetime file lock in the data directory rejects
+a second worker before it binds. The proxy has no UI, graph-management API, or
 static files. Agents receive a random graph token, never provider keys; both
 routes force the configured host-side models and reject streaming.
 
 | Environment variable | Default | Meaning |
 |---|---|---|
-| `ORC_PROXY_HOST` | `0.0.0.0` | Proxy bind address, reachable from agent bridges |
+| `ORC_PROXY_HOST` | required | Explicit proxy bind address, reachable from agent bridges |
 | `ORC_PROXY_PORT` | `8788` | Dedicated proxy port |
 | `ORC_GRAPH_TOKEN_BUDGET` | `100000` | Combined input/output tokens per graph; `0` disables this cap |
 | `ORC_GRAPH_USD_BUDGET` | `1` | Estimated dollars per graph; `0` disables this cap |
@@ -99,9 +102,10 @@ removes it. Usage updates use atomic file replacement.
 
 Containers use `--add-host host.docker.internal:host-gateway` and
 `http://host.docker.internal:8788/llm` or `/vision` (port follows configuration).
-Restrict proxy ingress to local agent bridges with a host firewall; the default
-wildcard bind otherwise exposes this port on every host interface. Alternatively
-bind `ORC_PROXY_HOST` to the Docker host-gateway address (commonly `172.17.0.1`).
+Set `ORC_PROXY_HOST` explicitly to the Docker host-gateway address (commonly
+`172.17.0.1`; verify locally); startup refuses an unset/empty address. There is no
+portable gateway default. A deliberate wildcard bind still needs a host firewall
+restricting proxy ingress to local agent bridges.
 Keep the **main API on loopback**, not `0.0.0.0` or the Docker gateway. For remote
 UI access use a private tunnel, or a dedicated private interface with firewall
 rules denying agent-bridge access. Proxy authentication does not protect the main API.
@@ -114,8 +118,9 @@ An enabled dollar budget requires at least one nonzero token price.
 The cap is checked before forwarding; one admitted request can exceed its remaining
 budget. The next request gets HTTP 429. Accounting relies on upstream `usage`;
 an otherwise successful response with missing/invalid usage closes the graph budget
-and returns 502. Failed/ambiguous network requests cannot be billed locally without
-reported usage. Upstream error bodies are limited to 300 characters.
+and returns 502. Ambiguous read/write failures also close the persisted budget,
+because a billable response may have been lost. Connect/pool failures count as
+attempts but do not close it. Upstream error bodies are limited to 300 characters.
 Call and runtime limits also return HTTP 429 before forwarding. Attempts are counted
 and persisted before upstream HTTP, even if it fails; restarts and re-provisioning do
 not reset them or the runtime epoch. These limits do not stop containers or cancel

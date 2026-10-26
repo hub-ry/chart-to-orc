@@ -59,8 +59,9 @@ def main():
     from evals.host_cases import CASES as host_cases
     from evals.review_proxy import CASES as review_proxy_cases
     from evals.review_host import CASES as review_host_cases
+    from evals.review_end_proxy import CASES as review_end_proxy_cases
 
-    cases = host_cases + agent_cases + review_proxy_cases + review_host_cases
+    cases = host_cases + agent_cases + review_proxy_cases + review_host_cases + review_end_proxy_cases
     failed = run(cases)
     total = len(cases)
     passed = total - len(failed)
