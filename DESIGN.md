@@ -33,7 +33,7 @@ Lives on hub, single user, tailnet-visible.
 {
   "name": "ship-docs",
   "agents": [
-    {"id": "researcher", "name": "Researcher", "system": "…", "tools": ["workspace", "computer_use"], "memory_mb": 512, "cpus": 1.0},
+    {"id": "researcher", "name": "Researcher", "system": "…", "tools": ["workspace"], "memory_mb": 512, "cpus": 1.0},
     {"id": "writer", "name": "Writer", "system": "…", "tools": ["workspace"]}
   ],
   "channels": [
@@ -44,7 +44,7 @@ Lives on hub, single user, tailnet-visible.
 ```
 
 Rules (enforced by `Graph`, not prose): ids are slugs `^[a-z][a-z0-9_-]{0,31}$`, unique;
-channel endpoints must be agents; no self-loops; tools ⊆ {workspace, computer_use};
+channel endpoints must be agents; no self-loops; tools ⊆ {workspace};
 kinds ⊆ {text, artifact, result}; ≥1 agent. Channels are directional — a two-way
 conversation is two arrows, two channels.
 
@@ -88,7 +88,7 @@ blindness is a broker ACL, not an instruction to the agent.
   runtime credentials (they are generated inside the provision step and only handed to
   agent containers).
 - I6. The only shared resource agents can see is the broker subjects listed above — that
-  is the filtered channel. Egress to the internet (LLM API, Manus API) is identical for
+  is the filtered channel. Egress to the internet (the LLM API) is identical for
   all agents and crosses no agent.
 
 ## Design space (exhaust-the-design-space)
@@ -100,13 +100,13 @@ blindness is a broker ACL, not an instruction to the agent.
 | agent↔agent reachability | shared bridge / per-agent bridge | per-agent bridge + nats multi-homed | makes cross-agent IP reachability structurally impossible (I1) |
 | state | DB / shared KV / none | none | subtract-before-you-add: graph.json + per-agent markdown files + NATS are enough; a DB would become a de-facto shared brain and a blindness leak |
 | chart parse | vision LLM / only JSON paste | both | vision is the product UX; JSON paste is the escape hatch when no vision-capable key is configured |
-| computer use | homegrown browser/OS stack / Manus API | Manus API | user's call; Manus sandbox is the hands, our fabric is the nervous system |
+| computer use | remote sandbox API / homegrown stack | none — the agent's own container is its computer | no remote computer-use provider available; shell + workspace files inside the container are the agent's hands |
 
 ## Layout on hub (follows hub convention)
 
 - Repo: `~/chart-to-orc` (git). Data: `~/chart-to-orc/data/<graph>/{graph.json,status.json,drawing.*,agents/<id>.md}`.
 - Secrets: `~/.config/chart-to-orc/env` (chmod 600) — `DEEPSEEK_API_KEY`, optional
-  `OPENAI_API_KEY` / `ORC_VISION_*` for the vision parser, `MANUS_API_KEY`.
+  `OPENAI_API_KEY` / `ORC_VISION_*` for the vision parser.
 - Serve: uvicorn on `0.0.0.0:8787` (tailnet-reachable), systemd user unit
   `chart-to-orc.service` with `EnvironmentFile=~/.config/chart-to-orc/env`.
 - Agent brain: DeepSeek (`deepseek-chat`, OpenAI-compatible) — the key already present on
@@ -128,7 +128,9 @@ blindness is a broker ACL, not an instruction to the agent.
 
 ## Open items
 
-- Manus API key path on hub (user will provide). Manus client is one function; nothing
-  else depends on it.
 - Vision parsing: DeepSeek `deepseek-flash` accepts image input on the standard chat
   endpoint — same key as the agent brain. Default vision model is `deepseek-flash`.
+- Real-world computer use (browsing, OS automation) needs a provider that offers it.
+  DeepSeek's API has no computer-use sandbox, so agents act through their own
+  container instead: shell + workspace files, nothing else. If a provider (e.g. Manus)
+  is added later, it plugs into `agentd` as one tool + one env key.

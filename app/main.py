@@ -79,7 +79,6 @@ def health() -> dict:
         "ok": True,
         "llm_ready": chat.ready,
         "vision_ready": vision.ready,
-        "manus_ready": bool(cfg.manus_api_key),
     }
 
 
@@ -159,11 +158,10 @@ async def accept_graph(name: str) -> dict:
         "api_key": cfg.llm_api_key,
         "model": cfg.llm_model,
     }
-    manus_env = {"api_key": cfg.manus_api_key, "base_url": cfg.manus_base_url}
     try:
         out = await asyncio.to_thread(
             provision, graph, cfg.data_dir, cfg.agent_image, cfg.nats_image,
-            ROOT / "agentd", llm_env, manus_env,
+            ROOT / "agentd", llm_env,
         )
     except ProvisionError as e:
         raise HTTPException(500, str(e))

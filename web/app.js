@@ -16,7 +16,7 @@ async function health() {
     const r = await fetch("/health");
     const h = await r.json();
     $("health").textContent =
-      `llm:${h.llm_ready ? "ready" : "no key"} · vision:${h.vision_ready ? "ready" : "no key"} · manus:${h.manus_ready ? "ready" : "no key"}`;
+      `llm:${h.llm_ready ? "ready" : "no key"} · vision:${h.vision_ready ? "ready" : "no key"}`;
     $("compile-drawing").disabled = !h.vision_ready;
   } catch { $("health").textContent = "backend unreachable"; }
 }

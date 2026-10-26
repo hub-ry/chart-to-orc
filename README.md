@@ -27,8 +27,7 @@ cd ~/chart-to-orc
 uv sync --extra dev          # first time
 # secrets: ~/.config/chart-to-orc/env (chmod 600)
 #   DEEPSEEK_API_KEY=...       agent brain + vision parser (deepseek-flash)
-#   MANUS_API_KEY=...          optional, computer-use tool
-#   ORC_LLM_BASE_URL / ORC_LLM_MODEL / ORC_VISION_* / ORC_MANUS_BASE_URL  overrides
+#   ORC_LLM_BASE_URL / ORC_LLM_MODEL / ORC_VISION_*  overrides
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8787
 ```
 
@@ -53,5 +52,5 @@ uv run pytest -q
 ## Status
 
 Working: spec/drawing → compile → validate; accept → provision; agent runtime (agentd)
-with workspace tools + optional Manus computer-use; per-agent prompt + live traffic.
+with shell + workspace tools in its own container; per-agent prompt + live traffic.
 See [DESIGN.md](DESIGN.md) proof table P1–P7.

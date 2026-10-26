@@ -16,7 +16,7 @@ import secrets
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 SLUG = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
-KNOWN_TOOLS = ("workspace", "computer_use")
+KNOWN_TOOLS = ("workspace",)
 KNOWN_KINDS = ("text", "artifact", "result")
 
 

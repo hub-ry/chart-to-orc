@@ -8,7 +8,7 @@ outbound channels.
 Environment (the interface):
   AGENT_ID, AGENT_NAME, GRAPH, SYSTEM, TOOLS, NATS_URL,
   OUT_CHANNELS, IN_CHANNELS (JSON), LLM_BASE_URL, LLM_API_KEY, LLM_MODEL,
-  WORKSPACE (default /workspace), MANUS_API_KEY + MANUS_BASE_URL (optional).
+  WORKSPACE (default /workspace).
 """
 
 from __future__ import annotations
@@ -47,9 +47,6 @@ OUT_CHANNELS = []
 IN_CHANNELS = []
 OUT_BY_ID = {}
 LIMITERS = {}
-COMPUTER_USE = False
-MANUS_API_KEY = ""
-MANUS_BASE_URL = ""
 
 NC = None
 HISTORY = deque()
@@ -183,21 +180,6 @@ def build_tools():
             },
         },
     ]
-    if COMPUTER_USE:
-        tools.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": "computer_use",
-                    "description": "Delegate a task to a remote computer-use agent (Manus).",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"prompt": {"type": "string"}},
-                        "required": ["prompt"],
-                    },
-                },
-            }
-        )
     return tools
 
 
@@ -345,19 +327,6 @@ async def tool_shell(args):
     return tool_result(result)
 
 
-async def tool_computer_use(args):
-    prompt = args.get("prompt", "")
-    if not prompt:
-        return err("computer_use requires a non-empty prompt")
-    import manus
-
-    try:
-        result = await asyncio.to_thread(manus.run_task, prompt, MANUS_API_KEY, MANUS_BASE_URL)
-    except Exception as e:
-        return err(f"computer_use failed: {e}")
-    return ok(result)
-
-
 async def execute_tool(name, args, sent):
     if name == "send":
         return await tool_send(args, sent)
@@ -369,8 +338,6 @@ async def execute_tool(name, args, sent):
         return tool_list_files(args)
     if name == "shell":
         return await tool_shell(args)
-    if name == "computer_use":
-        return await tool_computer_use(args)
     return err(f"unknown tool {name!r}")
 
 
@@ -526,7 +493,7 @@ async def connect_nats(nats_url):
 async def main():
     global AGENT_ID, AGENT_NAME, GRAPH, SYSTEM_PROMPT, WORKSPACE
     global LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, OUT_CHANNELS, IN_CHANNELS
-    global OUT_BY_ID, LIMITERS, COMPUTER_USE, MANUS_API_KEY, MANUS_BASE_URL, NC
+    global OUT_BY_ID, LIMITERS, NC
 
     NATS_URL = env("NATS_URL")
     if not NATS_URL:
@@ -543,8 +510,6 @@ async def main():
     LLM_BASE_URL = env("LLM_BASE_URL", "")
     LLM_API_KEY = env("LLM_API_KEY", "")
     LLM_MODEL = env("LLM_MODEL", "")
-    MANUS_API_KEY = env("MANUS_API_KEY", "")
-    MANUS_BASE_URL = env("MANUS_BASE_URL", "")
     SYSTEM_PROMPT = env("SYSTEM", "")
 
     try:
@@ -555,7 +520,6 @@ async def main():
         sys.exit(1)
 
     tools_list = [t for t in env("TOOLS", "workspace").split(",") if t]
-    COMPUTER_USE = bool(MANUS_API_KEY) and "computer_use" in tools_list
 
     OUT_BY_ID = {c["id"]: c for c in OUT_CHANNELS}
     LIMITERS = {c["id"]: RateLimiter(c.get("rate_per_min", 30)) for c in OUT_CHANNELS}

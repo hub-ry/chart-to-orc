@@ -31,8 +31,6 @@ class Config:
     vision_base_url: str
     vision_api_key: str
     vision_model: str
-    manus_api_key: str
-    manus_base_url: str
     agent_image: str
     nats_image: str
 
@@ -59,8 +57,6 @@ class Config:
             vision_base_url=get("ORC_VISION_BASE_URL", llm_base).rstrip("/"),
             vision_api_key=get("ORC_VISION_API_KEY") or llm_key,
             vision_model=get("ORC_VISION_MODEL", "deepseek-flash"),
-            manus_api_key=get("ORC_MANUS_API_KEY") or get("MANUS_API_KEY"),
-            manus_base_url=get("ORC_MANUS_BASE_URL", "https://api.manus.im").rstrip("/"),
             agent_image=get("ORC_AGENT_IMAGE", "chart-orc/agent:1"),
             nats_image=get("ORC_NATS_IMAGE", "nats:2.10-alpine"),
         )

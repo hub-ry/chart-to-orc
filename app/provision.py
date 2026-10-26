@@ -61,7 +61,6 @@ def provision(
     nats_image: str,
     build_dir: Path,
     llm_env: dict[str, str],
-    manus_env: dict[str, str],
 ) -> dict:
     d = data_dir / graph.name
     d.mkdir(parents=True, exist_ok=True)
@@ -134,9 +133,6 @@ def provision(
             "LLM_API_KEY": llm_env["api_key"],
             "LLM_MODEL": llm_env["model"],
         }
-        if manus_env.get("api_key"):
-            env["MANUS_API_KEY"] = manus_env["api_key"]
-            env["MANUS_BASE_URL"] = manus_env["base_url"]
         args = [
             "docker", "run", "-d", "--name", f"orc-{graph.name}-{a.id}",
             "--network", f"orc-{graph.name}-{a.id}",
