@@ -14,6 +14,8 @@ from pathlib import Path
 
 import nats
 
+from app.schema import SLUG
+
 TRAFFIC_CAP_LINES = 5000
 MAX_LOG_BYTES = 4_000_000
 
@@ -45,12 +47,12 @@ async def get_conn(graph_dir: Path, name: str):
     return nc
 
 
-async def start_observer(graph_dir: Path, name: str) -> None:
+async def start_observer(graph_dir: Path, name: str, channel_senders: dict[str, str]) -> None:
     if name in _observers:
         return
     nc = await get_conn(graph_dir, name)
     sub = await nc.subscribe(f"orc.{name}.>")
-    _observers[name] = asyncio.create_task(_persist(sub, graph_dir))
+    _observers[name] = asyncio.create_task(_persist(sub, graph_dir, name, channel_senders))
 
 
 def _md_line(msg: dict) -> str | None:
@@ -64,7 +66,7 @@ def _md_line(msg: dict) -> str | None:
     return f"### {msg.get('ts', '?')} {src} via {msg.get('ch', '?')}\n{text.strip()}\n\n"
 
 
-async def _persist(sub, graph_dir: Path) -> None:
+async def _persist(sub, graph_dir: Path, name: str, channel_senders: dict[str, str]) -> None:
     log = graph_dir / "traffic.jsonl"
     md_dir = graph_dir / "agents"
     while True:
@@ -74,6 +76,19 @@ async def _persist(sub, graph_dir: Path) -> None:
             obj = json.loads(data)
         except (UnicodeDecodeError, json.JSONDecodeError):
             continue
+        if not isinstance(obj, dict):
+            continue
+        parts = msg.subject.split(".")
+        src = None
+        if len(parts) == 4 and parts[:2] == ["orc", name]:
+            if parts[2] == "out":
+                src = parts[3]
+            elif parts[2] == "ch":
+                src = channel_senders.get(parts[3])
+            elif parts[2] == "in":
+                src = "user"
+        obj["src"] = src
+        data = json.dumps(obj, ensure_ascii=False)
         try:
             with log.open("a") as f:
                 f.write(data + "\n")
@@ -81,7 +96,7 @@ async def _persist(sub, graph_dir: Path) -> None:
                 lines = log.read_text().splitlines()[-TRAFFIC_CAP_LINES:]
                 log.write_text("\n".join(lines) + "\n")
             line = _md_line(obj)
-            if line and md_dir.is_dir():
+            if line and isinstance(src, str) and SLUG.fullmatch(src) and md_dir.is_dir():
                 p = md_dir / f"{obj['src']}.md"
                 with p.open("a") as f:
                     f.write(line)

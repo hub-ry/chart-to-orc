@@ -37,7 +37,8 @@ async def lifespan(app: FastAPI):
             try:
                 status = json.loads((d / "status.json").read_text())
                 if status.get("state") == "live":
-                    await fabric.start_observer(d, d.name)
+                    graph = Graph.model_validate(json.loads((d / "graph.json").read_text()))
+                    await fabric.start_observer(d, d.name, {c.id: c.from_ for c in graph.channels})
             except (OSError, json.JSONDecodeError, RuntimeError):
                 continue
     yield
@@ -170,7 +171,7 @@ async def accept_graph(name: str) -> dict:
         raise HTTPException(500, str(e))
     d = graph_dir(name)
     try:
-        await fabric.start_observer(d, name)
+        await fabric.start_observer(d, name, {c.id: c.from_ for c in graph.channels})
     except RuntimeError as e:
         raise HTTPException(503, f"provisioned, but observer cannot reach the broker yet: {e}")
     return {"status": "live", **out}
