@@ -135,3 +135,18 @@ Verification: a second scorecard run (`--label repeatability`) produced the same
 `.venv/bin/pytest -q` passed all 160 tests; the existing Starlette/httpx
 deprecation warning remains. No Docker commands, provider calls or live services
 were used.
+
+## Review mid
+
+### Proxy request bounds and prices
+Grok 2 / DeepSeek 4: real unbounded request-body and completion-limit paths.
+Stream-read at most 1 MiB before parsing; clamp requested output to 4096 or the
+remaining token allowance. Admission remains an estimate, not a hard billing cap:
+provider-specific prompt/vision usage can still overshoot, as documented.
+Grok 10: real ineffective dollar budget with two zero prices; reject that config.
+No new environment variables.
+
+Eval-first: new probes failed on oversized forwarding and accepted zero prices.
+Eval score before -> after: 16/31 (51.61%) -> 18/31 (58.06%); initial baseline
+16/29 (55.17%). All 160 tests passed. ASGI/mock-upstream probes exercised actual
+request rejection, completion clamping and credential creation without network I/O.

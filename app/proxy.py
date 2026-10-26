@@ -20,6 +20,9 @@ from fastapi.responses import JSONResponse
 from app.config import Config
 from app.schema import SLUG
 
+MAX_REQUEST_BYTES = 1024 * 1024
+MAX_COMPLETION_TOKENS = 4096
+
 
 def _save(path: Path, state: dict) -> None:
     temporary = path.with_suffix(".tmp")
@@ -67,6 +70,7 @@ def graph_token(directory: Path, cfg: Config) -> str:
         return state["token"]
     if (cfg.graph_token_budget < 0 or cfg.graph_usd_budget < 0
             or not (cfg.graph_token_budget or cfg.graph_usd_budget)
+            or (cfg.graph_usd_budget and not (cfg.price_in_per_m or cfg.price_out_per_m))
             or not all(math.isfinite(v) and v >= 0 for v in
                        (cfg.graph_usd_budget, cfg.price_in_per_m, cfg.price_out_per_m))):
         raise ValueError("proxy budgets/prices must be finite and nonnegative; enable at least one cap")
@@ -105,7 +109,12 @@ def create_proxy(cfg: Config, *, transport: httpx.AsyncBaseTransport | None = No
         if route not in ("llm", "vision"):
             raise HTTPException(404, "unknown route")
         try:
-            payload = await request.json()
+            body = bytearray()
+            async for chunk in request.stream():
+                if len(body) + len(chunk) > MAX_REQUEST_BYTES:
+                    raise HTTPException(413, "chat request too large")
+                body.extend(chunk)
+            payload = json.loads(body)
         except ValueError:
             raise HTTPException(400, "invalid JSON")
         if not isinstance(payload, dict) or payload.get("stream"):
@@ -133,6 +142,17 @@ def create_proxy(cfg: Config, *, transport: httpx.AsyncBaseTransport | None = No
                     (state["token_budget"] and state["tokens"] >= state["token_budget"]) or
                     (state["usd_budget"] and state["usd"] >= state["usd_budget"])):
                 return JSONResponse({"error": "graph budget exhausted"}, status_code=429)
+            # Bound output requests, not total billing: prompt/vision usage is provider-specific.
+            ceiling = MAX_COMPLETION_TOKENS
+            if state["token_budget"]:
+                ceiling = min(ceiling, state["token_budget"] - state["tokens"])
+            for field in ("max_tokens", "max_completion_tokens"):
+                if field in payload:
+                    if type(payload[field]) is not int or payload[field] <= 0:
+                        raise HTTPException(400, "completion limit must be a positive integer")
+                    payload[field] = min(payload[field], ceiling)
+            if not any(field in payload for field in ("max_tokens", "max_completion_tokens")):
+                payload["max_tokens"] = ceiling
             # Commit admission before I/O, including failed and interrupted upstream attempts.
             state["calls"] += 1
             _save(path, state)

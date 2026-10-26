@@ -100,6 +100,11 @@ Keep the **main API on loopback**, not `0.0.0.0` or the Docker gateway. For remo
 UI access use a private tunnel, or a dedicated private interface with firewall
 rules denying agent-bridge access. Proxy authentication does not protect the main API.
 
+Requests above 1 MiB are rejected before JSON parsing. Completion limits are
+clamped to 4096 tokens and the remaining token allowance; omitted limits use that
+ceiling. This bounds requested output, not prompt/vision tokens or actual billing.
+An enabled dollar budget requires at least one nonzero token price.
+
 The cap is checked before forwarding; one admitted request can exceed its remaining
 budget. The next request gets HTTP 429. Accounting relies on upstream `usage`;
 an otherwise successful response with missing/invalid usage closes the graph budget

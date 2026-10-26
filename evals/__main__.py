@@ -57,8 +57,9 @@ def main():
     dirty = bool(git("status", "--porcelain", "--untracked-files=all"))
     from evals.agent_cases import CASES as agent_cases
     from evals.host_cases import CASES as host_cases
+    from evals.review_proxy import CASES as review_proxy_cases
 
-    cases = host_cases + agent_cases
+    cases = host_cases + agent_cases + review_proxy_cases
     failed = run(cases)
     total = len(cases)
     passed = total - len(failed)
