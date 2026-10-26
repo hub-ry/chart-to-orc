@@ -14,10 +14,13 @@ Environment (the interface):
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from collections import deque
@@ -47,6 +50,10 @@ OUT_CHANNELS = []
 IN_CHANNELS = []
 OUT_BY_ID = {}
 LIMITERS = {}
+TOOLS_LIST = []
+VISION_BASE_URL = ""
+VISION_API_KEY = ""
+VISION_MODEL = ""
 
 NC = None
 HISTORY = deque()
@@ -180,6 +187,68 @@ def build_tools():
             },
         },
     ]
+    if "browser" in TOOLS_LIST:
+        tools += [
+            {
+                "type": "function",
+                "function": {
+                    "name": "browser_goto",
+                    "description": "Navigate the browser to a URL.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"url": {"type": "string"}},
+                        "required": ["url"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "browser_content",
+                    "description": "Read the visible text and links of the current page.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "browser_click",
+                    "description": "Click an element by CSS selector or visible text.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"target": {"type": "string"}},
+                        "required": ["target"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "browser_fill",
+                    "description": "Type text into an input by CSS selector.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "selector": {"type": "string"},
+                            "text": {"type": "string"},
+                        },
+                        "required": ["selector", "text"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "browser_screenshot",
+                    "description": "Save a screenshot to the workspace and describe it visually.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                    },
+                },
+            },
+        ]
     return tools
 
 
@@ -327,6 +396,165 @@ async def tool_shell(args):
     return tool_result(result)
 
 
+# ---- browser (Playwright; one instance per agent, inside this container) ----
+_browser_queue: "queue.Queue" = queue.Queue()
+_browser_thread = None
+
+
+def _browser_worker():
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(
+            headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"]
+        )
+        page = browser.new_page()
+        while True:
+            fut, fn, args = _browser_queue.get()
+            if fn is None:
+                break
+            try:
+                fut.set_result(fn(page, *args))
+            except Exception as e:
+                fut.set_exception(e)
+        browser.close()
+
+
+def _browser_call(fn, *args):
+    global _browser_thread
+    if _browser_thread is None:
+        _browser_thread = threading.Thread(target=_browser_worker, daemon=True)
+        _browser_thread.start()
+    fut = concurrent.futures.Future()
+    _browser_queue.put((fut, fn, args))
+    return asyncio.wrap_future(fut)
+
+
+async def tool_browser_goto(args):
+    url = str(args.get("url", ""))
+    if not url.startswith(("http://", "https://")):
+        return err("url must start with http:// or https://")
+
+    def op(page, url):
+        page.goto(url, timeout=45000, wait_until="domcontentloaded")
+        return page.title(), page.url
+
+    try:
+        title, final = await _browser_call(op, url)
+        return ok(f"navigated to {final} — title: {title!r}")
+    except Exception as e:
+        return err(f"browser_goto failed: {e}")
+
+
+async def tool_browser_content(args):
+    def op(page):
+        text = page.inner_text("body")[:8192]
+        links = [
+            f"{a.inner_text().strip()[:60]} → {a.get_attribute('href')}"
+            for a in page.query_selector_all("a[href]")[:60]
+        ]
+        return {"text": text, "links": links}
+
+    try:
+        data = await _browser_call(op)
+        return ok(json.dumps(data, ensure_ascii=False)[:9000])
+    except Exception as e:
+        return err(f"browser_content failed: {e}")
+
+
+async def tool_browser_click(args):
+    target = str(args.get("target", ""))
+    if not target:
+        return err("target is required (CSS selector or visible text)")
+
+    def op(page, target):
+        if target.startswith(("#", ".", "[")):
+            page.locator(target).first.click(timeout=15000)
+        else:
+            page.get_by_text(target, exact=False).first.click(timeout=15000)
+        return page.url
+
+    try:
+        final = await _browser_call(op, target)
+        return ok(f"clicked; now at {final}")
+    except Exception as e:
+        return err(f"browser_click failed: {e}")
+
+
+async def tool_browser_fill(args):
+    selector = str(args.get("selector", ""))
+    text = str(args.get("text", ""))
+    if not selector:
+        return err("selector is required")
+
+    def op(page, selector, text):
+        page.fill(selector, text, timeout=15000)
+        return True
+
+    try:
+        await _browser_call(op, selector, text)
+        return ok("filled")
+    except Exception as e:
+        return err(f"browser_fill failed: {e}")
+
+
+async def tool_browser_screenshot(args):
+    path = str(args.get("path", "shot.png"))
+    try:
+        target = resolve_path(path)
+    except ValueError as e:
+        return err(str(e))
+
+    def op(page, target):
+        page.screenshot(path=target)
+        return True
+
+    try:
+        await _browser_call(op, target)
+    except Exception as e:
+        return err(f"browser_screenshot failed: {e}")
+    if VISION_API_KEY:
+        try:
+            import base64
+
+            with open(target, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+            desc = await vision_describe(
+                b64, "Describe what is visible in this browser screenshot."
+            )
+            return ok(f"saved {path}; vision: {desc}")
+        except Exception as e:
+            return ok(f"saved {path} (vision describe failed: {e})")
+    return ok(f"saved {path}")
+
+
+async def vision_describe(image_b64: str, prompt: str) -> str:
+    url = VISION_BASE_URL.rstrip("/") + "/chat/completions"
+    payload = {
+        "model": VISION_MODEL,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+                    },
+                ],
+            }
+        ],
+    }
+    headers = {
+        "Authorization": f"Bearer {VISION_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+
+
 async def execute_tool(name, args, sent):
     if name == "send":
         return await tool_send(args, sent)
@@ -338,6 +566,16 @@ async def execute_tool(name, args, sent):
         return tool_list_files(args)
     if name == "shell":
         return await tool_shell(args)
+    if name == "browser_goto":
+        return await tool_browser_goto(args)
+    if name == "browser_content":
+        return await tool_browser_content(args)
+    if name == "browser_click":
+        return await tool_browser_click(args)
+    if name == "browser_fill":
+        return await tool_browser_fill(args)
+    if name == "browser_screenshot":
+        return await tool_browser_screenshot(args)
     return err(f"unknown tool {name!r}")
 
 
@@ -519,7 +757,11 @@ async def main():
         print(json.dumps({"event": "config_error", "error": f"bad channel JSON: {e}"}), flush=True)
         sys.exit(1)
 
-    tools_list = [t for t in env("TOOLS", "workspace").split(",") if t]
+    global TOOLS_LIST, VISION_BASE_URL, VISION_API_KEY, VISION_MODEL
+    TOOLS_LIST = [t for t in env("TOOLS", "workspace").split(",") if t]
+    VISION_BASE_URL = env("VISION_BASE_URL", "")
+    VISION_API_KEY = env("VISION_API_KEY", "")
+    VISION_MODEL = env("VISION_MODEL", "")
 
     OUT_BY_ID = {c["id"]: c for c in OUT_CHANNELS}
     LIMITERS = {c["id"]: RateLimiter(c.get("rate_per_min", 30)) for c in OUT_CHANNELS}

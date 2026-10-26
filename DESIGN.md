@@ -44,7 +44,7 @@ Lives on hub, single user, tailnet-visible.
 ```
 
 Rules (enforced by `Graph`, not prose): ids are slugs `^[a-z][a-z0-9_-]{0,31}$`, unique;
-channel endpoints must be agents; no self-loops; tools ⊆ {workspace};
+channel endpoints must be agents; no self-loops; tools ⊆ {workspace, browser};
 kinds ⊆ {text, artifact, result}; ≥1 agent. Channels are directional — a two-way
 conversation is two arrows, two channels.
 
@@ -100,7 +100,7 @@ blindness is a broker ACL, not an instruction to the agent.
 | agent↔agent reachability | shared bridge / per-agent bridge | per-agent bridge + nats multi-homed | makes cross-agent IP reachability structurally impossible (I1) |
 | state | DB / shared KV / none | none | subtract-before-you-add: graph.json + per-agent markdown files + NATS are enough; a DB would become a de-facto shared brain and a blindness leak |
 | chart parse | vision LLM / only JSON paste | both | vision is the product UX; JSON paste is the escape hatch when no vision-capable key is configured |
-| computer use | remote sandbox API / homegrown stack | none — the agent's own container is its computer | no remote computer-use provider available; shell + workspace files inside the container are the agent's hands |
+| computer use | remote sandbox API / shared browser MCP (Bladebro) / Playwright per agent | Playwright inside each agent's container | no remote provider available; a shared browser would share cookies/sessions and break blindness (I1); per-agent Chromium keeps isolation structural — also the stack Lauren Tan's pstack uses |
 
 ## Layout on hub (follows hub convention)
 
@@ -130,7 +130,6 @@ blindness is a broker ACL, not an instruction to the agent.
 
 - Vision parsing: DeepSeek `deepseek-flash` accepts image input on the standard chat
   endpoint — same key as the agent brain. Default vision model is `deepseek-flash`.
-- Real-world computer use (browsing, OS automation) needs a provider that offers it.
-  DeepSeek's API has no computer-use sandbox, so agents act through their own
-  container instead: shell + workspace files, nothing else. If a provider (e.g. Manus)
-  is added later, it plugs into `agentd` as one tool + one env key.
+- Computer use: each agent owns a headless Chromium via Playwright inside its container
+  (`browser_goto` / `content` / `click` / `fill` / `screenshot` + vision describe via
+  `deepseek-flash`). No external provider needed.

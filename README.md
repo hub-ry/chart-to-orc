@@ -52,5 +52,6 @@ uv run pytest -q
 ## Status
 
 Working: spec/drawing → compile → validate; accept → provision; agent runtime (agentd)
-with shell + workspace tools in its own container; per-agent prompt + live traffic.
+with shell + workspace tools and per-agent Playwright browser (computer use); per-agent
+prompt + live traffic.
 See [DESIGN.md](DESIGN.md) proof table P1–P7.

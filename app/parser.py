@@ -12,7 +12,7 @@ from app.schema import KNOWN_KINDS, Graph
 PARSE_PROMPT = """You parse a hand-drawn diagram of a multi-agent system into one strict JSON object.
 
 - "name": a slug for the whole system (lowercase, `^[a-z][a-z0-9_-]{0,31}$`), inferred from any title text; default "graph".
-- "agents": array of boxes in the drawing. Each: {"id": slug, "name": short label, "system": system prompt describing that agent's job (write it yourself if the drawing doesn't say), "tools": ["workspace"], "memory_mb": 512, "cpus": 1.0}.
+- "agents": array of boxes in the drawing. Each: {"id": slug, "name": short label, "system": system prompt describing that agent's job (write it yourself if the drawing doesn't say), "tools": subset of ["workspace", "browser"] (use "browser" only for boxes whose job says browse/search the web), "memory_mb": 512, "cpus": 1.0}.
 - "channels": array of arrows. Each: {"id": unique slug, "from": agent id, "to": agent id, "name": label text on the arrow, "filter": {"max_bytes": 16384, "rate_per_min": 30, "kinds": subset of ["text", "artifact", "result"]}}.
 - An arrow is one directional channel. If two agents are connected in both directions, emit two channels.
 - ids must be unique and match `^[a-z][a-z0-9_-]{0,31}$`.
@@ -40,7 +40,7 @@ def parse_drawing(llm: LLM, image_b64: str, media_type: str, *, attempts: int = 
         try:
             return Graph.model_validate(data)
         except ValidationError as e:
-            errors = json.dumps(e.errors(), indent=1)
+            errors = json.dumps(e.errors(), indent=1, default=str)
     raise ParseError(f"drawing did not yield a valid graph after {attempts} attempts: {errors}")
 
 
@@ -52,4 +52,4 @@ def parse_spec(text: str) -> Graph:
     try:
         return Graph.model_validate(data)
     except ValidationError as e:
-        raise ParseError(f"spec invalid: {json.dumps(e.errors(), indent=1)}") from e
+        raise ParseError(f"spec invalid: {json.dumps(e.errors(), indent=1, default=str)}") from e

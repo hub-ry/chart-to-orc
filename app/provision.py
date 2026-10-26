@@ -132,6 +132,9 @@ def provision(
             "LLM_BASE_URL": llm_env["base_url"],
             "LLM_API_KEY": llm_env["api_key"],
             "LLM_MODEL": llm_env["model"],
+            "VISION_BASE_URL": llm_env.get("vision_base_url") or llm_env["base_url"],
+            "VISION_API_KEY": llm_env.get("vision_api_key") or llm_env["api_key"],
+            "VISION_MODEL": llm_env.get("vision_model") or "",
         }
         args = [
             "docker", "run", "-d", "--name", f"orc-{graph.name}-{a.id}",
