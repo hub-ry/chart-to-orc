@@ -18,6 +18,7 @@ import concurrent.futures
 import json
 import os
 import queue
+import signal
 import subprocess
 import sys
 import threading
@@ -385,9 +386,15 @@ async def tool_shell(args):
             cwd=WORKSPACE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
         out, errb = await asyncio.wait_for(proc.communicate(), timeout=SHELL_TIMEOUT)
     except asyncio.TimeoutError:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        await proc.communicate()
         return err(f"shell command timed out after {SHELL_TIMEOUT}s")
     except Exception as e:
         return err(str(e))

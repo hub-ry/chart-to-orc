@@ -29,3 +29,43 @@ def test_browser_calls_refused_when_disabled(agent, name):
     assert result["ok"] is False
     assert "disabled" in result["error"]
     assert agent._browser_thread is None
+
+
+def test_shell_timeout_kills_process_group(agent, tmp_path, monkeypatch):
+    import os
+    import signal
+    from pathlib import Path
+
+    agent.WORKSPACE = str(tmp_path)
+    monkeypatch.setattr(agent, "SHELL_TIMEOUT", 0.1)
+    processes = []
+    create = asyncio.create_subprocess_shell
+
+    async def capture(*args, **kwargs):
+        proc = await create(*args, **kwargs)
+        processes.append(proc)
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_shell", capture)
+    async def run():
+        try:
+            result = json.loads(await agent.tool_shell({"cmd": "sleep 30 & echo $! > child.pid; wait"}))
+            assert "timed out" in result["error"]
+            child = int((tmp_path / "child.pid").read_text())
+            status = Path(f"/proc/{child}/stat")
+            assert not status.exists() or status.read_text().split()[2] == "Z"
+            assert processes[0].returncode is not None
+        finally:
+            for proc in processes:
+                if proc.returncode is None:
+                    # Also clean up when demonstrating the old timeout bug.
+                    child_file = tmp_path / "child.pid"
+                    if child_file.exists():
+                        try:
+                            os.kill(int(child_file.read_text()), signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    proc.kill()
+                    await proc.communicate()
+
+    asyncio.run(run())
