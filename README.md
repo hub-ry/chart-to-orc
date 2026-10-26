@@ -48,11 +48,13 @@ routes force the configured host-side models and reject streaming.
 | `ORC_PROXY_PORT` | `8788` | Dedicated proxy port |
 | `ORC_GRAPH_TOKEN_BUDGET` | `100000` | Combined input/output tokens per graph; `0` disables this cap |
 | `ORC_GRAPH_USD_BUDGET` | `1` | Estimated dollars per graph; `0` disables this cap |
+| `ORC_GRAPH_MAX_CALLS` | `200` | Maximum upstream attempts per graph, shared by text and vision |
+| `ORC_GRAPH_MAX_SECONDS` | `1800` | Maximum elapsed seconds since first provisioning |
 | `ORC_PRICE_IN_PER_M` | `1` | Estimated dollars per million input tokens |
 | `ORC_PRICE_OUT_PER_M` | `3` | Estimated dollars per million output tokens |
 
-At least one cap must be enabled. Prices are simple estimates shared by text and
-vision, not provider billing. Budgets/prices are captured at first provision.
+At least one token/dollar cap must be enabled. Prices are simple estimates shared by
+text and vision, not provider billing. Budgets/prices are captured at first provision.
 `proxy.json` in the graph data directory holds the token, caps, prices and usage
 with mode `0600`; re-provisioning and restarts preserve it. Deleting the graph
 removes it. Usage updates use atomic file replacement.
@@ -71,6 +73,13 @@ budget. The next request gets HTTP 429. Accounting relies on upstream `usage`;
 an otherwise successful response with missing/invalid usage closes the graph budget
 and returns 502. Failed/ambiguous network requests cannot be billed locally without
 reported usage. Upstream error bodies are limited to 300 characters.
+Call and runtime limits also return HTTP 429 before forwarding. Attempts are counted
+and persisted before upstream HTTP, even if it fails; restarts and re-provisioning do
+not reset them or the runtime epoch. These limits do not stop containers or cancel
+in-flight calls. Old proxy state gains these limits on first use; it uses the existing
+`status.json` provisioning time when available, otherwise a persisted migration time.
+Historical call counts from before this upgrade are unavailable and start at zero.
+Both call and runtime limits must be positive.
 
 Existing running containers retain their old environment until explicitly
 re-provisioned. This change does not alter running containers automatically.

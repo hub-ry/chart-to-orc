@@ -39,6 +39,9 @@ class Config:
     graph_usd_budget: float = 1.0
     price_in_per_m: float = 1.0
     price_out_per_m: float = 3.0
+    max_hops: int = 8
+    graph_max_calls: int = 200
+    graph_max_seconds: float = 1800
 
     @classmethod
     def load(cls, extra: dict[str, str] | None = None) -> "Config":
@@ -71,4 +74,7 @@ class Config:
             graph_usd_budget=float(get("ORC_GRAPH_USD_BUDGET", "1")),
             price_in_per_m=float(get("ORC_PRICE_IN_PER_M", "1")),
             price_out_per_m=float(get("ORC_PRICE_OUT_PER_M", "3")),
+            max_hops=int(get("ORC_MAX_HOPS", "8")),
+            graph_max_calls=int(get("ORC_GRAPH_MAX_CALLS", "200")),
+            graph_max_seconds=float(get("ORC_GRAPH_MAX_SECONDS", "1800")),
         )

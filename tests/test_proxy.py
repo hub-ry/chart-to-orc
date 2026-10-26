@@ -2,6 +2,7 @@ import asyncio
 import json
 import stat
 from dataclasses import replace
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -74,6 +75,7 @@ def test_shared_budget_persisted_and_models_forced(setup_proxy, budget):
     assert response.status_code == 429
     assert response.json() == {"error": "graph budget exhausted"}
     assert len(calls) == (2 if budget == "tokens" else 1)
+    assert json.loads(state_path.read_text())["calls"] == len(calls)
 
 
 def test_graph_tokens_isolate_budgets(setup_proxy):
@@ -151,3 +153,215 @@ def test_provision_never_passes_upstream_keys(setup_proxy, monkeypatch):
         assert f"LLM_BASE_URL=http://host.docker.internal:{cfg.proxy_port}/llm" in args
         assert f"VISION_BASE_URL=http://host.docker.internal:{cfg.proxy_port}/vision" in args
     assert stat.S_IMODE((directory / "proxy.json").stat().st_mode) == 0o600
+
+
+@pytest.fixture
+def guarded_proxy(setup_proxy, monkeypatch):
+    cfg, directory, token = setup_proxy
+    now = [1000.0]
+    monkeypatch.setattr("app.proxy.time", SimpleNamespace(time=lambda: now[0]))
+    cfg = replace(cfg, graph_max_calls=2, graph_max_seconds=30)
+    path = directory / "proxy.json"
+    state = json.loads(path.read_text())
+    state.update(max_calls=2, max_seconds=30, calls=0, provisioned_at=now[0])
+    path.write_text(json.dumps(state))
+    return cfg, directory, token, now
+
+
+def test_call_boundary_shared_routes_and_persisted_caps(guarded_proxy):
+    cfg, directory, token, _ = guarded_proxy
+    calls = []
+    path = directory / "proxy.json"
+    def upstream(request):
+        calls.append(request)
+        # Admission is durable before the upstream request, not after its response.
+        assert json.loads(path.read_text())["calls"] == len(calls)
+        return httpx.Response(200, json={"usage": {"prompt_tokens": 1, "completion_tokens": 0}})
+    headers = {"Authorization": f"Bearer {token}"}
+    client = client_for(cfg, upstream)
+    for route in ("llm", "vision"):
+        assert client.post(f"/{route}/chat/completions", headers=headers, json={}).status_code == 200
+    larger = replace(cfg, graph_max_calls=2000, graph_max_seconds=3000)
+    assert graph_token(directory, larger) == token
+    restarted = client_for(larger, upstream)
+    response = restarted.post("/llm/chat/completions", headers=headers, json={})
+    assert response.status_code == 429
+    assert response.json() == {"error": "graph call limit exhausted"}
+    state = json.loads(path.read_text())
+    assert state["calls"] == 2 and state["max_calls"] == 2
+    assert state["max_seconds"] == 30
+    assert len(calls) == 2
+
+
+def test_concurrent_routes_share_call_admission(guarded_proxy):
+    cfg, directory, token, _ = guarded_proxy
+    path = directory / "proxy.json"
+    state = json.loads(path.read_text())
+    state["max_calls"] = 1
+    path.write_text(json.dumps(state))
+    calls = []
+    async def upstream(request):
+        calls.append(request)
+        await asyncio.sleep(0.01)
+        return httpx.Response(200, json={"usage": {"prompt_tokens": 1, "completion_tokens": 0}})
+    async def scenario():
+        app = create_proxy(cfg, transport=httpx.MockTransport(upstream))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as client:
+            responses = await asyncio.gather(*[
+                client.post(f"/{route}/chat/completions", headers={"Authorization": f"Bearer {token}"}, json={})
+                for route in ("llm", "vision")])
+        assert sorted(response.status_code for response in responses) == [200, 429]
+        rejected = next(response for response in responses if response.status_code == 429)
+        assert rejected.json() == {"error": "graph call limit exhausted"}
+    asyncio.run(scenario())
+    assert len(calls) == 1
+    assert json.loads(path.read_text())["calls"] == 1
+
+
+@pytest.mark.parametrize("failure", ["transport", "http"])
+def test_failed_attempts_count_and_survive_restart(guarded_proxy, failure):
+    cfg, directory, token, _ = guarded_proxy
+    calls = []
+    def upstream(request):
+        calls.append(request)
+        assert json.loads((directory / "proxy.json").read_text())["calls"] == len(calls)
+        if failure == "transport":
+            raise httpx.ConnectError("offline failure", request=request)
+        return httpx.Response(503, json={"error": "unavailable"})
+    headers = {"Authorization": f"Bearer {token}"}
+    for route in ("llm", "vision"):
+        # Recreate the ASGI application between attempts as well as after exhaustion.
+        client = client_for(cfg, upstream)
+        response = client.post(f"/{route}/chat/completions", headers=headers, json={})
+        assert response.status_code == (502 if failure == "transport" else 503)
+        assert graph_token(directory, cfg) == token
+    response = client_for(cfg, upstream).post("/vision/chat/completions", headers=headers, json={})
+    assert response.status_code == 429
+    assert response.json() == {"error": "graph call limit exhausted"}
+    state = json.loads((directory / "proxy.json").read_text())
+    assert state["calls"] == 2 and state["tokens"] == 0 and state["usd"] == 0
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(("elapsed", "status"), [(29.999, 200), (30, 200), (30.001, 429)])
+def test_runtime_exact_boundary(guarded_proxy, elapsed, status):
+    cfg, directory, token, now = guarded_proxy
+    now[0] += elapsed
+    calls = []
+    def upstream(request):
+        calls.append(request)
+        return httpx.Response(200, json={"usage": {"prompt_tokens": 1, "completion_tokens": 0}})
+    response = client_for(cfg, upstream).post(
+        "/llm/chat/completions", headers={"Authorization": f"Bearer {token}"}, json={})
+    assert response.status_code == status
+    if status == 429:
+        assert response.json() == {"error": "graph runtime limit exhausted"}
+    assert len(calls) == (1 if status == 200 else 0)
+    assert json.loads((directory / "proxy.json").read_text())["calls"] == len(calls)
+
+
+def test_runtime_checked_after_lock_acquisition(guarded_proxy):
+    cfg, directory, token, now = guarded_proxy
+    calls = []
+    async def upstream(request):
+        calls.append(request)
+        await asyncio.sleep(0.01)
+        now[0] = 1030.001
+        return httpx.Response(200, json={"usage": {"prompt_tokens": 1, "completion_tokens": 0}})
+    async def scenario():
+        app = create_proxy(cfg, transport=httpx.MockTransport(upstream))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as client:
+            responses = await asyncio.gather(*[
+                client.post(f"/{route}/chat/completions", headers={"Authorization": f"Bearer {token}"}, json={})
+                for route in ("llm", "vision")])
+        assert sorted(response.status_code for response in responses) == [200, 429]
+        rejected = next(response for response in responses if response.status_code == 429)
+        assert rejected.json() == {"error": "graph runtime limit exhausted"}
+    asyncio.run(scenario())
+    assert len(calls) == 1
+    assert json.loads((directory / "proxy.json").read_text())["calls"] == 1
+
+
+def test_runtime_keeps_original_provisioning_time(guarded_proxy):
+    cfg, directory, token, now = guarded_proxy
+    now[0] = 1010
+    (directory / "status.json").write_text(json.dumps({"provisioned_at": now[0]}))
+    assert graph_token(directory, replace(cfg, graph_max_seconds=3000)) == token
+    now[0] = 1030.001
+    def unexpected(request):
+        pytest.fail("expired graph reached upstream after re-provisioning")
+    response = client_for(cfg, unexpected).post(
+        "/vision/chat/completions", headers={"Authorization": f"Bearer {token}"}, json={})
+    assert response.status_code == 429
+    assert response.json() == {"error": "graph runtime limit exhausted"}
+    assert json.loads((directory / "proxy.json").read_text())["provisioned_at"] == 1000
+
+
+@pytest.mark.parametrize("original", [980, None])
+@pytest.mark.parametrize("migrate_on_provision", [False, True])
+def test_legacy_state_migrates_once(guarded_proxy, original, migrate_on_provision):
+    cfg, directory, token, now = guarded_proxy
+    path = directory / "proxy.json"
+    state = json.loads(path.read_text())
+    for key in ("max_calls", "max_seconds", "calls", "provisioned_at"):
+        del state[key]
+    state.update(tokens=3, usd=0.000005)
+    path.write_text(json.dumps(state))
+    if original is not None:
+        (directory / "status.json").write_text(json.dumps({"provisioned_at": original}))
+    if migrate_on_provision:
+        assert graph_token(directory, cfg) == token
+        (directory / "status.json").write_text(json.dumps({"provisioned_at": now[0]}))
+    calls = []
+    def upstream(request):
+        calls.append(request)
+        return httpx.Response(200, json={"usage": {"prompt_tokens": 1, "completion_tokens": 0}})
+    headers = {"Authorization": f"Bearer {token}"}
+    assert client_for(cfg, upstream).post("/llm/chat/completions", headers=headers, json={}).status_code == 200
+    migrated = json.loads(path.read_text())
+    started = 1000 if original is None else original
+    assert migrated["provisioned_at"] == started
+    assert migrated["max_calls"] == 2 and migrated["max_seconds"] == 30
+    assert migrated["calls"] == 1 and migrated["tokens"] == 4
+    assert migrated["usd"] >= state["usd"]
+    now[0] = started + 30.001
+    (directory / "status.json").write_text(json.dumps({"provisioned_at": now[0]}))
+    assert graph_token(directory, cfg) == token
+    response = client_for(cfg, upstream).post("/vision/chat/completions", headers=headers, json={})
+    assert response.status_code == 429
+    assert response.json() == {"error": "graph runtime limit exhausted"}
+    assert json.loads(path.read_text())["provisioned_at"] == started
+    assert len(calls) == 1
+
+
+def test_expired_legacy_state_is_migrated_before_rejection(guarded_proxy):
+    cfg, directory, token, _ = guarded_proxy
+    path = directory / "proxy.json"
+    state = json.loads(path.read_text())
+    for key in ("max_calls", "max_seconds", "calls", "provisioned_at"):
+        del state[key]
+    path.write_text(json.dumps(state))
+    (directory / "status.json").write_text(json.dumps({"provisioned_at": 900}))
+    def unexpected(request):
+        pytest.fail("expired legacy graph reached upstream")
+    response = client_for(cfg, unexpected).post(
+        "/llm/chat/completions", headers={"Authorization": f"Bearer {token}"}, json={})
+    assert response.status_code == 429
+    assert response.json() == {"error": "graph runtime limit exhausted"}
+    migrated = json.loads(path.read_text())
+    assert migrated["provisioned_at"] == 900 and migrated["calls"] == 0
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("graph_max_calls", 0), ("graph_max_calls", -1),
+    ("graph_max_seconds", 0), ("graph_max_seconds", -1),
+    ("graph_max_seconds", float("inf")), ("graph_max_seconds", float("nan")),
+])
+def test_invalid_guard_caps_do_not_create_proxy_state(guarded_proxy, field, value):
+    cfg, _, _, _ = guarded_proxy
+    directory = cfg.data_dir / "new"
+    directory.mkdir()
+    with pytest.raises(ValueError, match="call and runtime caps"):
+        graph_token(directory, replace(cfg, **{field: value}))
+    assert not (directory / "proxy.json").exists()

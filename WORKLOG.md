@@ -54,3 +54,22 @@ path returned 404. No provider requests, listeners, Docker commands or live-serv
 changes were used for verification. Real bridge connectivity and socket lifecycle
 remain unexercised under this session's restrictions. The existing Starlette/httpx
 TestClient deprecation warning remains.
+
+## Graph call and runtime limits
+The host proxy now shares a call counter and runtime limit across text and vision.
+Attempts are saved before upstream HTTP, including failures. The graph's original
+provisioning time, counters and limits survive restart and re-provisioning; calls
+are refused with 429 after the call cap or when elapsed time exceeds the runtime
+cap. Containers and in-flight requests are not stopped.
+
+New environment variables: `ORC_GRAPH_MAX_CALLS` (default `200`) and
+`ORC_GRAPH_MAX_SECONDS` (default `1800`), both positive. Existing proxy state is
+migrated once, using `status.json` provisioning time if available, otherwise a
+persisted migration time. Historical calls are unknown and start at zero.
+
+Offline verification: the full suite passes (112 tests, one existing
+Starlette/httpx deprecation warning). ASGI/mock-HTTP cases cover shared and
+concurrent admission, failed attempts, exact runtime boundaries, restart and
+legacy migration. An actual agent HTTP call through the ASGI proxy with mocked
+upstream HTTP exercised both call and runtime refusals. No provider requests,
+listeners, containers or live services were used.
