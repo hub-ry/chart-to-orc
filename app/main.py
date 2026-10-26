@@ -1,25 +1,49 @@
-"""chart-to-orc web app. Draw → compile → provision → prompt blind agents."""
+"""chart-to-orc web app. Draw → compile → accept → prompt blind agents."""
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import shutil
 import time
+import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from app import fabric
 from app.config import Config
 from app.llm import LLM
 from app.parser import ParseError, parse_drawing, parse_spec
+from app.provision import ProvisionError, provision, teardown
+from app.schema import Graph
 
 ROOT = Path(__file__).resolve().parent.parent
 cfg = Config.load()
 
-app = FastAPI(title="chart-to-orc")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # resume observing every live graph after a restart
+    if cfg.data_dir.is_dir():
+        for d in cfg.data_dir.iterdir():
+            if not d.is_dir():
+                continue
+            try:
+                status = json.loads((d / "status.json").read_text())
+                if status.get("state") == "live":
+                    await fabric.start_observer(d, d.name)
+            except (OSError, json.JSONDecodeError):
+                continue
+    yield
+
+
+app = FastAPI(title="chart-to-orc", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=ROOT / "web"), name="static")
 
 MAX_DRAWING_BYTES = 10 * 1024 * 1024
@@ -33,6 +57,13 @@ def graph_dir(name: str) -> Path:
 def load_status(name: str) -> dict:
     p = graph_dir(name) / "status.json"
     return json.loads(p.read_text()) if p.is_file() else {}
+
+
+def load_graph(name: str) -> dict:
+    p = graph_dir(name) / "graph.json"
+    if not p.is_file():
+        raise HTTPException(404, "no such graph")
+    return json.loads(p.read_text())
 
 
 @app.get("/")
@@ -115,19 +146,99 @@ def list_graphs() -> dict:
 
 @app.get("/api/graphs/{name}")
 def get_graph(name: str) -> dict:
-    p = graph_dir(name) / "graph.json"
-    if not p.is_file():
-        raise HTTPException(404, "no such graph")
-    graph = json.loads(p.read_text())
+    graph = load_graph(name)
     return {**graph, "status": load_status(name).get("state", "pending")}
 
 
-@app.delete("/api/graphs/{name}")
-def delete_graph(name: str) -> dict:
-    d = graph_dir(name)
-    if not d.is_dir():
-        raise HTTPException(404, "no such graph")
+@app.post("/api/graphs/{name}/accept")
+async def accept_graph(name: str) -> dict:
+    graph = Graph.model_validate(load_graph(name))
     if load_status(name).get("state") == "live":
-        raise HTTPException(409, "graph is live; teardown not implemented yet")
-    shutil.rmtree(d)
+        raise HTTPException(409, "already live")
+    llm_env = {
+        "base_url": cfg.llm_base_url,
+        "api_key": cfg.llm_api_key,
+        "model": cfg.llm_model,
+    }
+    manus_env = {"api_key": cfg.manus_api_key, "base_url": cfg.manus_base_url}
+    try:
+        out = await asyncio.to_thread(
+            provision, graph, cfg.data_dir, cfg.agent_image, cfg.nats_image,
+            ROOT / "agentd", llm_env, manus_env,
+        )
+    except ProvisionError as e:
+        raise HTTPException(500, str(e))
+    d = graph_dir(name)
+    await fabric.start_observer(d, name)
+    return {"status": "live", **out}
+
+
+@app.get("/api/graphs/{name}/agents/{aid}")
+def agent_file(name: str, aid: str) -> Response:
+    load_graph(name)
+    p = graph_dir(name) / "agents" / f"{aid}.md"
+    if not p.is_file():
+        raise HTTPException(404, "agent has no markdown file (is the graph live?)")
+    return Response(p.read_text(), media_type="text/markdown")
+
+
+@app.post("/api/graphs/{name}/agents/{aid}/prompt")
+async def prompt_agent(name: str, aid: str, body: dict) -> dict:
+    graph = load_graph(name)
+    if aid not in {a["id"] for a in graph["agents"]}:
+        raise HTTPException(404, "no such agent")
+    if load_status(name).get("state") != "live":
+        raise HTTPException(409, "graph is not live")
+    text = str(body.get("prompt", "")).strip()
+    if not text:
+        raise HTTPException(400, "prompt is empty")
+    d = graph_dir(name)
+    nc = await fabric.get_conn(d, name)
+    msg = {
+        "v": 1,
+        "msg_id": str(uuid.uuid4()),
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "src": "user",
+        "ch": f"in.{aid}",
+        "kind": "text",
+        "body": {"text": text},
+        "prev": None,
+    }
+    await nc.publish(f"orc.{name}.in.{aid}", json.dumps(msg).encode())
+    p = d / "agents" / f"{aid}.md"
+    try:
+        with p.open("a") as f:
+            f.write(f"### {msg['ts']} you\n{text}\n\n")
+    except OSError:
+        pass
+    return {"ok": True, "msg_id": msg["msg_id"]}
+
+
+@app.get("/api/graphs/{name}/traffic")
+def traffic(name: str, after: int = 0) -> dict:
+    p = graph_dir(name) / "traffic.jsonl"
+    if not p.is_file():
+        return {"lines": [], "next": 0}
+    lines = p.read_text().splitlines()
+    new = lines[after:]
+    parsed = []
+    for line in new:
+        try:
+            parsed.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return {"lines": parsed, "next": len(lines)}
+
+
+@app.delete("/api/graphs/{name}")
+async def delete_graph(name: str) -> dict:
+    graph = load_graph(name)
+    if load_status(name).get("state") == "live":
+        await fabric.stop_observer(name)
+        await asyncio.to_thread(
+            teardown, Graph.model_validate(graph), cfg.data_dir, rm_data=False
+        )
+    d = graph_dir(name)
+    if d.is_dir():
+        shutil.rmtree(d)
     return {"deleted": name}

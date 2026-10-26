@@ -1,0 +1,27 @@
+# chart-to-orc: web app + observer, on hub.
+# Install: sudo cp deploy/chart-to-orc.service /etc/systemd/system/ && sudo systemctl enable --now chart-to-orc
+[Unit]
+Description=chart-to-orc: draw charts, run blind agents
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ryanhubbart
+Group=ryanhubbart
+WorkingDirectory=/home/ryanhubbart/chart-to-orc
+# 0600, holds DEEPSEEK_API_KEY and optionally MANUS_API_KEY (hub convention)
+EnvironmentFile=/home/ryanhubbart/.config/chart-to-orc/env
+ExecStart=/home/ryanhubbart/chart-to-orc/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8787
+Restart=always
+RestartSec=5
+
+# NoNewPrivileges and private /tmp; docker CLI + loopback NATS still fine.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/ryanhubbart/chart-to-orc/data
+
+[Install]
+WantedBy=multi-user.target

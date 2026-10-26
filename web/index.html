@@ -32,6 +32,22 @@
     <h2>graphs</h2>
     <ul id="graphs"></ul>
   </section>
+  <section class="card" id="agent-panel" hidden>
+    <div class="panel-head">
+      <h2 id="panel-title"></h2>
+      <button id="panel-close">close</button>
+    </div>
+    <p id="panel-error" class="error" hidden></p>
+    <div class="md-view" id="md-view"></div>
+    <div class="prompt-box">
+      <textarea id="prompt" rows="3" spellcheck="false" placeholder="prompt this agent…"></textarea>
+      <button id="send-prompt" class="primary">send</button>
+    </div>
+    <div class="traffic">
+      <h3>traffic</h3>
+      <ul id="traffic"></ul>
+    </div>
+  </section>
 </main>
 <script src="/static/app.js"></script>
 </body>
