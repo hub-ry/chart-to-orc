@@ -16,8 +16,31 @@ import nats
 
 from app.schema import SLUG
 
-TRAFFIC_CAP_LINES = 5000
 MAX_LOG_BYTES = 4_000_000
+
+
+def append_bounded(path: Path, text: str) -> None:
+    """Keep complete recent lines, never reading more than the storage byte cap."""
+    data = text.encode("utf-8")
+    if len(data) > MAX_LOG_BYTES:
+        return
+    with path.open("r+b" if path.exists() else "w+b") as file:
+        file.seek(0, 2)
+        size = file.tell()
+        if size + len(data) <= MAX_LOG_BYTES:
+            file.write(data)
+            return
+        keep = MAX_LOG_BYTES - len(data)
+        start = max(0, size - keep)
+        file.seek(start)
+        tail = file.read(keep)
+        if start:
+            newline = tail.find(b"\n")
+            tail = tail[newline + 1:] if newline >= 0 else b""
+        file.seek(0)
+        file.write(tail)
+        file.write(data)
+        file.truncate()
 
 _connections: dict[str, object] = {}
 _observers: dict[str, asyncio.Task] = {}
@@ -90,16 +113,11 @@ async def _persist(sub, graph_dir: Path, name: str, channel_senders: dict[str, s
         obj["src"] = src
         data = json.dumps(obj, ensure_ascii=False)
         try:
-            with log.open("a") as f:
-                f.write(data + "\n")
-            if log.stat().st_size > MAX_LOG_BYTES:
-                lines = log.read_text().splitlines()[-TRAFFIC_CAP_LINES:]
-                log.write_text("\n".join(lines) + "\n")
+            append_bounded(log, data + "\n")
             line = _md_line(obj)
             if line and isinstance(src, str) and SLUG.fullmatch(src) and md_dir.is_dir():
                 p = md_dir / f"{obj['src']}.md"
-                with p.open("a") as f:
-                    f.write(line)
+                append_bounded(p, line)
         except Exception:
             import traceback
 

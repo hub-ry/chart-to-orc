@@ -15,6 +15,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 
 from app import fabric
 from app.config import Config
@@ -41,7 +42,7 @@ async def lifespan(app: FastAPI):
                     if status.get("state") == "live":
                         graph = Graph.model_validate(json.loads((d / "graph.json").read_text()))
                         await fabric.start_observer(d, d.name, {c.id: c.from_ for c in graph.channels})
-                except (OSError, json.JSONDecodeError, RuntimeError):
+                except (OSError, json.JSONDecodeError, RuntimeError, ValidationError):
                     continue
         yield
 
@@ -238,8 +239,7 @@ async def prompt_agent(name: str, aid: str, body: dict) -> dict:
     await nc.publish(f"orc.{name}.in.{aid}", json.dumps(msg).encode())
     p = d / "agents" / f"{aid}.md"
     try:
-        with p.open("a") as f:
-            f.write(f"### {msg['ts']} you\n{text}\n\n")
+        fabric.append_bounded(p, f"### {msg['ts']} you\n{text}\n\n")
     except OSError:
         pass
     return {"ok": True, "msg_id": msg["msg_id"]}

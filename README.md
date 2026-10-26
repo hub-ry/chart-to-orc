@@ -166,6 +166,12 @@ marks the graph failed, and preserves existing retained workspaces. Reaccept
 removes departed agents' resources; DELETE cleans inventoried resources regardless
 of status. Agent containers have a 256-process limit.
 
+Traffic and agent markdown each retain at most 4,000,000 bytes of recent complete
+lines. Oversized individual appends are dropped; trimming reads only a bounded
+tail, not the entire prior file. These are rolling views, not archival records.
+On startup, a schema-invalid saved graph is skipped without preventing valid
+sibling graphs from resuming.
+
 ## Tests
 
 ```bash

@@ -204,3 +204,29 @@ error before recording a score; the recorded before run above verified the same
 failures before implementation. All 160 tests passed. Mock Docker state exercised
 fresh/failed reaccept, overwritten specs, private files and pending deletion; actual
 Docker/network/volume behavior was not exercised under the session restrictions.
+
+### Bounded observer storage and resilient resume
+Grok 6: traffic and agent markdown now keep at most 4,000,000 bytes each;
+trimming reads a bounded tail and discards partial/oversized lines instead of
+reading the whole file and retaining an unbounded last-5000-lines total. User
+prompt markdown uses the same cap. Grok 9: skip Pydantic ValidationError on
+resume so one invalid saved graph does not disable the app or valid siblings.
+No new environment variables.
+
+Eval-first: both new probes failed on current code. Eval score before -> after
+(integrated tree): 18/33 (54.55%) -> 32/43 (74.42%). An intermediate 19/40
+(47.50%) run caught an append-mode trimming bug in this change and included seven
+new still-unfixed provisioning probes; both issues were fixed before committing.
+All 160 tests passed. Actual observer writes of twenty 300-KiB messages stayed
+within both byte caps, preserved the newest JSON row, and the lifespan/ASGI probe
+kept health available and resumed a valid sibling beside a schema-invalid graph.
+
+### Review outcome
+Every numbered finding from both reports is listed above, including duplicates,
+partial fixes and rejected scope. Baseline 16/29 (55.17%) -> final 32/43 (74.42%);
+all fourteen added cases pass and both existing provisioning cases now pass.
+The eleven remaining failures are preexisting unimplemented result envelopes,
+result validation/waiting, TTL and live-graph capacity features, not regressions.
+All checks were offline; no containers, services, firewall, provider APIs or
+credential files were accessed. Existing history was preserved and each commit
+includes evals/history.jsonl.
