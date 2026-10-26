@@ -290,3 +290,16 @@ Offline ASGI/captured-command evals exercise failed provision, departed agents,
 capacity and TTL. A separate real app lifespan smoke observed background GC
 remove expired resources, preserve a fresh graph and finish shutdown, with
 mocked broker/proxy/Docker operations. No live services or provider calls used.
+
+## Broker payload ceiling and send-rate limits
+
+The existing generated NATS configuration already enforces
+`max_payload: 1048576` per graph server; no second size setting is needed.
+DESIGN now distinguishes that whole-envelope ceiling from receiving agents'
+per-channel body/kind checks. A compromised agent can use its own password to
+publish directly within its ACL, bypassing cooperative send-rate checks; there
+is no broker-side per-channel rate cap. No new environment variables.
+
+Eval score before -> after: 43/43 (100.00%) -> 43/43 (100.00%).
+All 176 offline tests pass; one existing Starlette/httpx warning remains.
+No broker or container was started; broker enforcement itself was not exercised.

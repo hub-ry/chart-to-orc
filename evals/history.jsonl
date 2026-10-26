@@ -28,3 +28,4 @@
 {"ts": "2026-10-26T04:48:57.723677+00:00", "commit": "4b9e787", "dirty": true, "label": "before-task6", "passed": 39, "total": 43, "score": 90.69767441860465, "failed": ["TTL removes expired graph and Docker resources", "TTL preserves fresh live graph", "zero TTL disables cleanup", "live graph cap rejects drafts but allows live reaccept"]}
 {"ts": "2026-10-26T04:50:08.314037+00:00", "commit": "4b9e787", "dirty": true, "label": "after-lifecycle", "passed": 43, "total": 43, "score": 100.0, "failed": []}
 {"ts": "2026-10-26T04:50:46.750269+00:00", "commit": "4b9e787", "dirty": true, "label": "after-lifecycle-logged", "passed": 43, "total": 43, "score": 100.0, "failed": []}
+{"ts": "2026-10-26T04:51:10.365634+00:00", "commit": "11ebd79", "dirty": true, "label": "after-broker-limits", "passed": 43, "total": 43, "score": 100.0, "failed": []}

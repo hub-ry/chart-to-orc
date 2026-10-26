@@ -95,6 +95,17 @@ blindness is a broker ACL, not an instruction to the agent.
   The shared LLM proxy forwards independent requests without sharing agent history;
   text and vision consume one persisted budget per graph.
 
+## Known limits
+
+Agents hold their own NATS passwords. A compromised agent can publish directly
+within its subject ACL and bypass agentd's send-side kind, size and rate checks.
+The generated per-graph NATS server config already sets `max_payload: 1048576`,
+a broker-enforced 1 MiB ceiling on the entire encoded message, not a per-channel
+body limit. Receiving agents still enforce each channel's kinds and `max_bytes`.
+Send rate limits remain cooperative: there is no broker-side per-channel rate
+limit, so direct publishing can flood allowed subjects. Subject ACLs still apply.
+
+
 ## Design space (exhaust-the-design-space)
 
 | Fork | Options | Choice | Why |
