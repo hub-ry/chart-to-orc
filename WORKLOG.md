@@ -73,3 +73,20 @@ concurrent admission, failed attempts, exact runtime boundaries, restart and
 legacy migration. An actual agent HTTP call through the ASGI proxy with mocked
 upstream HTTP exercised both call and runtime refusals. No provider requests,
 listeners, containers or live services were used.
+
+## Message hop limit
+User prompts now start at hop zero. Tool sends and automatic replies increment
+the triggering message's hop count while retaining its conversation and parent
+message id. Incoming messages above the limit are logged and dropped before
+history or LLM work. At-limit sends return an error to the model; automatic
+replies cannot bypass the same check. Missing counts default to zero for older
+envelopes; negative, noninteger and boolean counts are logged and dropped.
+
+New environment variable: `ORC_MAX_HOPS` (default `8`, nonnegative), passed into
+containers as `MAX_HOPS`. No running containers were changed.
+
+Offline verification: the old agent called the LLM for a hop-9 message; the
+regressions now confirm it is dropped without a call. The full suite passes
+(112 tests). An agent-to-ASGI-proxy smoke with mocked upstream HTTP preserved
+parent/conversation/hop-8 lineage, refused at-limit tool and automatic sends,
+and dropped hop 9. The only warning is the existing Starlette/httpx deprecation.

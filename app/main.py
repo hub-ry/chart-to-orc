@@ -213,6 +213,7 @@ async def prompt_agent(name: str, aid: str, body: dict) -> dict:
         "kind": "text",
         "body": {"text": text},
         "prev": None,
+        "hops": 0,
     }
     msg["conv"] = msg["msg_id"]
     await nc.publish(f"orc.{name}.in.{aid}", json.dumps(msg).encode())

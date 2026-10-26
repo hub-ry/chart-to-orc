@@ -33,6 +33,8 @@ def test_valid_slugs_and_prompt_conversation(web_app, monkeypatch):
     assert response.status_code == 200
     message = json.loads(nc.publish.call_args.args[1])
     assert message["conv"] == message["msg_id"] == response.json()["msg_id"]
+    assert message["prev"] is None
+    assert message["hops"] == 0
 
 
 def test_traffic_reads_bounded_tail_and_polls(web_app, monkeypatch):

@@ -131,7 +131,7 @@ def test_tool_send_propagates_conversation_on_all_routes(agent):
         for to, channel in [("user", "out"), ("b", "c")]:
             result = await agent.tool_send(
                 {"to": to, "channel_id": channel, "kind": "text", "body": {"text": "hello"}},
-                {"conv": "root", "prev": "parent"},
+                {"conv": "root", "prev": "parent", "hops": 3},
             )
             assert json.loads(result)["ok"]
 
@@ -140,3 +140,72 @@ def test_tool_send_propagates_conversation_on_all_routes(agent):
         message = json.loads(call.args[1])
         assert message["conv"] == "root"
         assert message["prev"] == "parent"
+        assert message["hops"] == 3
+
+
+@pytest.mark.parametrize("hops", [9, -1, True, "9"])
+def test_invalid_or_excess_hops_drop_before_llm(agent, capsys, hops):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    agent.llm_chat = AsyncMock()
+    agent.NC = AsyncMock()
+    envelope = {"v": 1, "msg_id": "parent", "src": "a", "ch": "ch.c",
+                "kind": "text", "body": {"text": "loop"}, "hops": hops}
+    handler = agent.make_handler("orc.g.ch.c", None, False)
+    asyncio.run(handler(SimpleNamespace(data=json.dumps(envelope).encode())))
+    agent.llm_chat.assert_not_called()
+    agent.NC.publish.assert_not_called()
+    assert not agent.HISTORY
+    assert "dropped_" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("to,channel", [("user", "out"), ("b", "c")])
+def test_send_at_hop_limit_returns_error_to_model(agent, to, channel):
+    from unittest.mock import AsyncMock
+
+    agent.NC = AsyncMock()
+    agent.OUT_BY_ID = {"c": {"id": "c", "to": "b", "kinds": ["text"]}}
+    args = {"to": to, "channel_id": channel, "kind": "text", "body": {"text": "loop"}}
+    agent.llm_chat = AsyncMock(side_effect=[
+        {"choices": [{"message": {"tool_calls": [
+            {"id": "send-1", "function": {"name": "send", "arguments": json.dumps(args)}}
+        ]}}]},
+        {"choices": [{"message": {"content": "plain fallback must not bypass limit"}}]},
+    ])
+    asyncio.run(agent.handle_envelope(
+        {"msg_id": "parent", "conv": "root", "hops": agent.MAX_HOPS, "body": {}},
+        "orc.g.ch.c", False,
+    ))
+    messages = agent.llm_chat.call_args.args[0]
+    result = json.loads(next(m["content"] for m in messages if m["role"] == "tool"))
+    assert result["ok"] is False
+    assert "hop limit" in result["error"]
+    agent.NC.publish.assert_not_called()
+
+
+@pytest.mark.parametrize("use_tool", [False, True])
+def test_last_allowed_reply_preserves_lineage(agent, use_tool):
+    from unittest.mock import AsyncMock
+
+    agent.NC = AsyncMock()
+    if use_tool:
+        agent.OUT_BY_ID = {"c": {"id": "c", "to": "b", "kinds": ["text"]}}
+        args = {"to": "b", "channel_id": "c", "kind": "text", "body": {"text": "last"}}
+        first = {"tool_calls": [
+            {"id": "send-1", "function": {"name": "send", "arguments": json.dumps(args)}}
+        ]}
+        agent.llm_chat = AsyncMock(side_effect=[
+            {"choices": [{"message": first}]},
+            {"choices": [{"message": {"content": ""}}]},
+        ])
+    else:
+        agent.llm_chat = AsyncMock(return_value={"choices": [{"message": {"content": "last"}}]})
+    asyncio.run(agent.handle_envelope(
+        {"msg_id": "parent", "conv": "root", "hops": agent.MAX_HOPS - 1, "body": {}},
+        "orc.g.ch.c", False,
+    ))
+    message = json.loads(agent.NC.publish.call_args.args[1])
+    assert message["hops"] == agent.MAX_HOPS
+    assert message["prev"] == "parent"
+    assert message["conv"] == "root"

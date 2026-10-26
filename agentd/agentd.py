@@ -8,7 +8,7 @@ outbound channels.
 Environment (the interface):
   AGENT_ID, AGENT_NAME, GRAPH, SYSTEM, TOOLS, NATS_URL,
   OUT_CHANNELS, IN_CHANNELS (JSON), LLM_BASE_URL, LLM_API_KEY, LLM_MODEL,
-  WORKSPACE (default /workspace).
+  WORKSPACE (default /workspace), MAX_HOPS (default 8).
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ USER_KINDS = ("text", "artifact", "result")
 MAX_TOOL_CALLS = 8
 HISTORY_MAX = 20
 CONVERSATIONS_MAX = 50
+MAX_HOPS = 8
 SHELL_TIMEOUT = 60
 SHELL_CAPTURE = 8192
 
@@ -278,6 +279,8 @@ def ok(msg):
 
 
 async def tool_send(args, sent):
+    if sent["hops"] > MAX_HOPS:
+        return err(f"hop limit exceeded (MAX_HOPS={MAX_HOPS}); send refused")
     to = args.get("to")
     channel_id = args.get("channel_id")
     kind = args.get("kind")
@@ -320,6 +323,7 @@ async def tool_send(args, sent):
         "body": body,
         "prev": sent["prev"],
         "conv": sent["conv"],
+        "hops": sent["hops"],
     }
     data = json.dumps(envelope, ensure_ascii=False).encode()
     if max_bytes is not None and len(data) > max_bytes:
@@ -619,24 +623,14 @@ def format_incoming(envelope):
     )
 
 
-def publish_out(text, prev_msg_id, conv):
-    envelope = {
-        "v": 1,
-        "msg_id": str(uuid.uuid4()),
-        "ts": now_iso(),
-        "src": AGENT_ID,
-        "ch": f"out.{AGENT_ID}",
-        "kind": "text",
-        "body": {"text": text},
-        "prev": prev_msg_id,
-        "conv": conv,
-    }
-    subject = f"orc.{GRAPH}.out.{AGENT_ID}"
-    asyncio.ensure_future(NC.publish(subject, json.dumps(envelope, ensure_ascii=False).encode()))
-    log("sent", subject, envelope["msg_id"])
-
-
 async def handle_envelope(envelope, subject, trigger_is_in):
+    hops = envelope.get("hops", 0)
+    if type(hops) is not int or hops < 0:
+        log("dropped_invalid_hops", subject, envelope.get("msg_id"))
+        return
+    if hops > MAX_HOPS:
+        log("dropped_max_hops", subject, envelope.get("msg_id"))
+        return
     conv = envelope.get("conv") or envelope.get("msg_id") or str(uuid.uuid4())
     history = HISTORY.pop(conv, None)
     if history is None:
@@ -649,7 +643,8 @@ async def handle_envelope(envelope, subject, trigger_is_in):
     messages.extend(history)
 
     tools = build_tools()
-    sent = {"user": False, "any": False, "conv": conv, "prev": envelope.get("msg_id")}
+    sent = {"user": False, "any": False, "conv": conv,
+            "prev": envelope.get("msg_id"), "hops": hops + 1}
     final_text = ""
     try:
         for _ in range(MAX_TOOL_CALLS):
@@ -684,7 +679,12 @@ async def handle_envelope(envelope, subject, trigger_is_in):
     if not sent["any"] and final_text.strip():
         # The model answered in plain text without using send. Route the reply
         # to the operator rather than dropping it silently.
-        publish_out(final_text, envelope.get("msg_id"), conv)
+        result = await tool_send(
+            {"to": "user", "channel_id": "out", "kind": "text", "body": {"text": final_text}},
+            sent,
+        )
+        if not json.loads(result)["ok"]:
+            log("dropped_max_hops", subject, envelope.get("msg_id"))
 
 
 def validate_envelope(data):
@@ -750,7 +750,7 @@ async def connect_nats(nats_url):
 async def main():
     global AGENT_ID, AGENT_NAME, GRAPH, SYSTEM_PROMPT, WORKSPACE
     global LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, OUT_CHANNELS, IN_CHANNELS
-    global OUT_BY_ID, LIMITERS, NC
+    global OUT_BY_ID, LIMITERS, NC, MAX_HOPS
 
     NATS_URL = env("NATS_URL")
     if not NATS_URL:
@@ -768,6 +768,9 @@ async def main():
     LLM_API_KEY = env("LLM_API_KEY", "")
     LLM_MODEL = env("LLM_MODEL", "")
     SYSTEM_PROMPT = env("SYSTEM", "")
+    MAX_HOPS = int(env("MAX_HOPS", "8"))
+    if MAX_HOPS < 0:
+        raise ValueError("MAX_HOPS must be nonnegative")
 
     try:
         OUT_CHANNELS = json.loads(env("OUT_CHANNELS", "[]"))

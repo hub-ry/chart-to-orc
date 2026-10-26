@@ -133,6 +133,7 @@ def provision(
             "OUT_CHANNELS": json.dumps(out_ch),
             "IN_CHANNELS": json.dumps(in_ch),
             "WORKSPACE": "/workspace",
+            "MAX_HOPS": str(cfg.max_hops),
             "LLM_BASE_URL": proxy_url + "/llm",
             "LLM_API_KEY": token,
             "LLM_MODEL": cfg.llm_model,

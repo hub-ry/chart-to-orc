@@ -84,6 +84,20 @@ Both call and runtime limits must be positive.
 Existing running containers retain their old environment until explicitly
 re-provisioned. This change does not alter running containers automatically.
 
+## Message loop guard
+
+`ORC_MAX_HOPS` (default `8`, nonnegative) is passed to agent containers as
+`MAX_HOPS`. User prompts start with `hops: 0` and `prev: null`. Every response,
+including automatic plain-text replies, retains `conv`, sets `prev` to the
+triggering message id, and increments `hops`.
+
+Agents log and drop incoming messages above the limit before calling the LLM.
+A message at the limit may be processed, but its send tool returns an error
+visible to the model; automatic replies cannot bypass the limit. Missing hop
+counts are treated as zero for older envelopes; invalid counts are logged and
+dropped. Existing containers need explicit re-provisioning to receive the new
+runtime and environment.
+
 ## Data
 
 - `~/chart-to-orc/data/<graph>/` — `graph.json` (spec), `status.json`,
