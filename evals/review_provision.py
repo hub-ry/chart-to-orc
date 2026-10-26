@@ -177,6 +177,32 @@ async def bounded_agent_processes(ctx):
                     "process hardening replaced persistent workspace")
 
 
+async def private_agent_credentials(ctx):
+    from pathlib import Path
+    cfg = ctx.config()
+    resources = Resources(ctx)
+    resources.provision(cfg, _graph())
+    token = json.loads((ctx.path / "g" / "proxy.json").read_text())["token"]
+    runs = [args for args in resources.commands
+            if args[:3] == ("docker", "run", "-d") and args[-1] == cfg.agent_image]
+    for args in runs:
+        ctx.require(not any(value.startswith(("LLM_API_KEY=", "VISION_API_KEY=", "NATS_URL="))
+                            for value in args), "agent credentials exposed in process arguments")
+        ctx.require("--env-file" in args, "private agent credential file missing")
+        path = Path(args[args.index("--env-file") + 1])
+        ctx.require(path.parent == ctx.path / "g"
+                    and stat.S_IMODE(path.stat().st_mode) == 0o600,
+                    "agent credentials file must be private graph data")
+        env = dict(line.split("=", 1) for line in path.read_text().splitlines())
+        ctx.require(env["LLM_API_KEY"] == token and env["VISION_API_KEY"] == token
+                    and env["NATS_URL"].startswith("nats://orc-g-"),
+                    "private env file lost scoped credentials")
+        path.chmod(0o644)
+    resources.provision(cfg, _graph())
+    ctx.require(all(stat.S_IMODE(path.stat().st_mode) == 0o600
+                    for path in (ctx.path / "g").glob("agent-*.env")),
+                "reaccept must repair credential file modes")
+
 CASES = [
     ("review-provision", "broker credential files are private on creation and repair", credential_modes),
     ("review-provision", "resource inventory survives overwritten graph specifications", overwritten_spec_cleanup),
@@ -185,4 +211,5 @@ CASES = [
     ("review-provision", "early failed reaccept clears live status and resources", early_failure_nonlive),
     ("review-provision", "pending API delete cleans independently inventoried resources", pending_delete_inventory),
     ("review-provision", "agents have bounded process counts and persistent workspaces", bounded_agent_processes),
+    ("end", "agent credentials stay out of process arguments", private_agent_credentials),
 ]

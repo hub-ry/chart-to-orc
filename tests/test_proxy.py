@@ -2,6 +2,7 @@ import asyncio
 import json
 import stat
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -162,7 +163,9 @@ def test_provision_never_passes_upstream_keys(setup_proxy, monkeypatch):
     assert len(containers) == 2
     for args in containers:
         assert "host.docker.internal:host-gateway" in args
-        assert f"LLM_API_KEY={token}" in args and f"VISION_API_KEY={token}" in args
+        env_file = Path(args[args.index("--env-file") + 1])
+        credentials = env_file.read_text()
+        assert all(secret not in credentials for secret in (cfg.llm_api_key, cfg.vision_api_key))
         assert f"LLM_BASE_URL=http://host.docker.internal:{cfg.proxy_port}/llm" in args
         assert f"VISION_BASE_URL=http://host.docker.internal:{cfg.proxy_port}/vision" in args
     assert stat.S_IMODE((directory / "proxy.json").stat().st_mode) == 0o600

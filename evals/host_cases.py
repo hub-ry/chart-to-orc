@@ -95,7 +95,8 @@ async def provision_credentials(ctx):
             if args[:3] == ("docker", "run", "-d") and args[-1] == cfg.agent_image]
     ctx.require(len(runs) == 2, "real provision must launch both agents")
     for args in runs:
-        env = dict(args[i + 1].split("=", 1) for i, arg in enumerate(args) if arg == "-e")
+        from evals.support import captured_environment
+        env = captured_environment(args)
         for route, prefix in (("llm", "LLM"), ("vision", "VISION")):
             ctx.require(env[f"{prefix}_BASE_URL"] ==
                         f"http://host.docker.internal:{cfg.proxy_port}/{route}",

@@ -83,6 +83,11 @@ a second worker before it binds. The proxy has no UI, graph-management API, or
 static files. Agents receive a random graph token, never provider keys; both
 routes force the configured host-side models and reject streaming.
 
+Agent NATS passwords and graph bearer tokens are passed via private 0600
+`agent-<id>.env` files, not Docker process arguments. They still become container
+environment variables; shell access can read and export the graph's credentials.
+Host Docker access can inspect them too. These are not provider credentials.
+
 | Environment variable | Default | Meaning |
 |---|---|---|
 | `ORC_PROXY_HOST` | required | Explicit proxy bind address, reachable from agent bridges |

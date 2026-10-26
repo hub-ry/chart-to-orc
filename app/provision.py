@@ -214,6 +214,10 @@ def _start(
             "VISION_API_KEY": token,
             "VISION_MODEL": cfg.vision_model,
         }
+        credentials = d / f"agent-{a.id}.env"
+        _write_private(credentials, "".join(
+            f"{key}={env.pop(key)}\n" for key in ("NATS_URL", "LLM_API_KEY", "VISION_API_KEY")
+        ))
         args = [
             "docker", "run", "-d", "--name", f"orc-{graph.name}-{a.id}",
             "--network", f"orc-{graph.name}-{a.id}",
@@ -222,6 +226,7 @@ def _start(
             "--pids-limit", "256",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "-v", f"orc-{graph.name}-{a.id}-ws:/workspace",
+            "--env-file", str(credentials),
         ]
         for k, v in env.items():
             args += ["-e", f"{k}={v}"]

@@ -254,11 +254,10 @@ async def enabled_shell_environment(ctx, key, vision):
     for command in ctx.commands:
         if command[:3] != ("docker", "run", "-d"):
             continue
-        for index, argument in enumerate(command[:-1]):
-            if argument == "-e":
-                name, _, value = command[index + 1].partition("=")
-                if name in {"LLM_API_KEY", "VISION_API_KEY"}:
-                    environment[name] = value
+        from evals.support import captured_environment
+        for name, value in captured_environment(command).items():
+            if name in {"LLM_API_KEY", "VISION_API_KEY"}:
+                environment[name] = value
     ctx.require(set(environment) == {"LLM_API_KEY", "VISION_API_KEY"} and
                 environment["LLM_API_KEY"] == environment["VISION_API_KEY"] and
                 bool(environment["LLM_API_KEY"]) and key not in environment.values() and vision not in environment.values(),

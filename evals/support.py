@@ -22,6 +22,19 @@ async def forbidden_async(*args, **kwargs):
     forbidden()
 
 
+def captured_environment(command):
+    """Read only temporary fixture files named by captured Docker argv."""
+    environment = {}
+    for index, argument in enumerate(command[:-1]):
+        if argument == "--env-file":
+            environment.update(line.split("=", 1)
+                               for line in Path(command[index + 1]).read_text().splitlines())
+        elif argument == "-e":
+            name, _, value = command[index + 1].partition("=")
+            environment[name] = value
+    return environment
+
+
 class Broker:
     def __init__(self):
         self.messages = []

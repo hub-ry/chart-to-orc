@@ -445,3 +445,18 @@ failed at 51/54 (94.44%). Eval score before -> after: 51/54 (94.44%) ->
 54/54 (100.00%). All 176 tests pass. Real temporary-file permission checks,
 kernel lock contention and ASGI/mock-upstream timeout/restart paths were
 exercised; no socket was opened and no live multiworker server was started.
+
+### Private agent credential arguments
+
+- Grok 2 (arguments): real local process-list exposure. Move NATS_URL,
+  LLM_API_KEY and VISION_API_KEY into per-agent 0600 env files consumed with
+  --env-file; reaccept replaces/repairs modes. The graph token is still available
+  to its agent and can be exported by shell; this does not promise non-exportable
+  tokens or hide Docker inspect from a trusted host administrator.
+  No new environment variables.
+
+Eval-first failed on credential-bearing arguments. Eval score before -> after:
+54/55 (98.18%) -> 55/55 (100.00%). All 176 tests pass. Captured provisioning
+commands and real temporary private-file creation/repair were exercised; Docker
+was not run. Existing captured-config probes now read the fixture env files as
+well as -e options, preserving the same credential and routing assertions.
