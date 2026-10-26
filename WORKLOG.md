@@ -318,3 +318,63 @@ from the requested list (dependency/code words are not personal references).
 Eval score before -> after: 43/43 (100.00%) -> 43/43 (100.00%).
 All 176 tests pass, with the existing Starlette/httpx warning. No service file
 was installed and no service or container was changed; deployment is operator-run.
+
+## Deploying this branch
+
+New hardening environment variables across this branch:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `ORC_API_TOKEN` | empty | Management API refuses requests until a token is configured or no-auth is explicitly allowed |
+| `ORC_ALLOW_NO_AUTH` | unset/false | Only `1` permits unauthenticated API use when no token is set |
+| `ORC_PROXY_HOST` | `0.0.0.0` | Agent-only proxy listener bind |
+| `ORC_PROXY_PORT` | `8788` | Agent-only proxy listener port |
+| `ORC_GRAPH_TOKEN_BUDGET` | `100000` | Shared text/vision token budget; `0` disables |
+| `ORC_GRAPH_USD_BUDGET` | `1` | Shared estimated-dollar budget; `0` disables |
+| `ORC_PRICE_IN_PER_M` | `1` | Estimated dollars per million input tokens |
+| `ORC_PRICE_OUT_PER_M` | `3` | Estimated dollars per million output tokens |
+| `ORC_GRAPH_MAX_CALLS` | `200` | Positive maximum upstream attempts per graph |
+| `ORC_GRAPH_MAX_SECONDS` | `1800` | Positive proxy runtime limit from original provisioning; does not stop containers |
+| `ORC_MAX_HOPS` | `8` | Nonnegative cooperative message hop cap, passed as agent `MAX_HOPS` |
+| `ORC_GRAPH_TTL_SECONDS` | `0` | Disabled by default; positive TTL tears down old live graphs and their workspace volumes |
+| `ORC_MAX_LIVE_GRAPHS` | `5` | Admission cap on live graphs; live reaccept is permitted |
+
+At least one token/dollar budget must remain enabled. An enabled dollar cap needs
+a nonzero price. Proxy budgets/prices/call/runtime limits persist per graph;
+changing defaults does not reset existing proxy state. TTL instead uses the last
+successful provisioning time in status and is checked about every 60 seconds.
+The service template also explicitly sets the existing `ORC_DATA_DIR` to
+`/opt/chart-to-orc/data`; interactive config defaults to `~/chart-to-orc/data`.
+
+Operator steps (not executed during this task):
+
+1. Review/merge the hardening commits into the intended deployment checkout,
+   preserving its data. Do not point a running service at this test worktree.
+2. Set a separate random `ORC_API_TOKEN`, provider configuration and desired limits
+   in the private env file (0600). Keep TTL at zero unless removal of old live
+   graphs and workspaces is intended. The supplied service reads
+   `/etc/chart-to-orc/env`; interactive config additionally loads
+   `~/.config/chart-to-orc/env`, which overrides process env values. Avoid conflicts.
+3. Adapt YOUR_USER/YOUR_GROUP and `/opt/chart-to-orc` paths in the service template,
+   including the data path; give the service user access to that data directory.
+   Reinstall the service file and reload the service manager's unit definitions.
+   Keep the main API on 127.0.0.1 and run one uvicorn worker.
+4. Install updated project dependencies, then explicitly rebuild the configured
+   agent image from `agentd/` (default tag `chart-orc/agent:1`): agentd changed
+   across this branch. Image existence checks alone will not rebuild an old tag.
+5. Apply an operator-reviewed firewall policy allowing agent bridges to reach
+   only the host proxy port, not the management API or other host services.
+   Restrict proxy access on other interfaces as well.
+6. Restart the service. Check health and authenticated API access. Enter the API
+   token in the UI; graph bearer tokens and this token are intentionally separate.
+7. Re-accept existing graphs so containers receive the graph proxy token/URLs,
+   hop limit, updated result behavior and rebuilt agent runtime; old running
+   containers retain their old environment, including any provider credentials.
+   Reaccept also installs the generated broker config and removes departed agents.
+   Confirm traffic/result behavior and inspect status. Existing proxy caps remain.
+
+Documentation-only final change; no new environment variables beyond those listed.
+Eval score before -> after: 43/43 (100.00%) -> 43/43 (100.00%).
+Final offline suite: 176 passed, one existing Starlette/httpx deprecation warning.
+All task commits include eval history. No deployment commands, real broker/Docker
+operations, secret files or provider calls were used.

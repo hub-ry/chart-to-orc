@@ -30,3 +30,4 @@
 {"ts": "2026-10-26T04:50:46.750269+00:00", "commit": "4b9e787", "dirty": true, "label": "after-lifecycle-logged", "passed": 43, "total": 43, "score": 100.0, "failed": []}
 {"ts": "2026-10-26T04:51:10.365634+00:00", "commit": "11ebd79", "dirty": true, "label": "after-broker-limits", "passed": 43, "total": 43, "score": 100.0, "failed": []}
 {"ts": "2026-10-26T04:52:20.020446+00:00", "commit": "0436f45", "dirty": true, "label": "after-open-source", "passed": 43, "total": 43, "score": 100.0, "failed": []}
+{"ts": "2026-10-26T04:53:04.524981+00:00", "commit": "5597e32", "dirty": true, "label": "after-deployment-guide", "passed": 43, "total": 43, "score": 100.0, "failed": []}
