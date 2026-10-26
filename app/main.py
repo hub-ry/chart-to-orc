@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import hmac
+import logging
 import json
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,6 +28,36 @@ from app.proxy import running_proxy
 
 ROOT = Path(__file__).resolve().parent.parent
 cfg = Config.load()
+_lifecycle_lock = asyncio.Lock()
+logger = logging.getLogger(__name__)
+
+
+async def cleanup_expired_graphs(config: Config) -> None:
+    """Expire live resources, retaining specs, logs and an explicit status."""
+    if config.graph_ttl_seconds <= 0 or not config.data_dir.is_dir():
+        return
+    async with _lifecycle_lock:
+        for d in config.data_dir.iterdir():
+            if not d.is_dir() or not SLUG.fullmatch(d.name):
+                continue
+            try:
+                status = json.loads((d / "status.json").read_text())
+                if (status.get("state") != "live"
+                        or time.time() - status["provisioned_at"] <= config.graph_ttl_seconds):
+                    continue
+                graph = Graph.model_validate_json((d / "graph.json").read_text())
+                await fabric.stop_observer(d.name)
+                await asyncio.to_thread(teardown, graph, config.data_dir, rm_data=False)
+                status.update(state="expired", expired_at=time.time())
+                (d / "status.json").write_text(json.dumps(status, indent=2))
+            except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+                logger.exception("Graph cleanup failed for %s", d.name)
+
+
+async def _graph_gc() -> None:
+    while True:
+        await cleanup_expired_graphs(cfg)
+        await asyncio.sleep(60)
 
 
 @asynccontextmanager
@@ -44,7 +75,13 @@ async def lifespan(app: FastAPI):
                         await fabric.start_observer(d, d.name, {c.id: c.from_ for c in graph.channels})
                 except (OSError, json.JSONDecodeError, RuntimeError, ValidationError):
                     continue
-        yield
+        gc = asyncio.create_task(_graph_gc())
+        try:
+            yield
+        finally:
+            gc.cancel()
+            with suppress(asyncio.CancelledError):
+                await gc
 
 
 app = FastAPI(title="chart-to-orc", lifespan=lifespan)
@@ -181,21 +218,29 @@ def get_graph(name: str) -> dict:
 
 @app.post("/api/graphs/{name}/accept")
 async def accept_graph(name: str) -> dict:
-    graph = Graph.model_validate(load_graph(name))
-    await fabric.stop_observer(name)  # converge: restart cleanly if already live
-    try:
-        out = await asyncio.to_thread(
-            provision, graph, cfg.data_dir, cfg.agent_image, cfg.nats_image,
-            ROOT / "agentd", cfg,
-        )
-    except ProvisionError as e:
-        raise HTTPException(500, str(e))
-    d = graph_dir(name)
-    try:
-        await fabric.start_observer(d, name, {c.id: c.from_ for c in graph.channels})
-    except RuntimeError as e:
-        raise HTTPException(503, f"provisioned, but observer cannot reach the broker yet: {e}")
-    return {"status": "live", **out}
+    async with _lifecycle_lock:
+        graph = Graph.model_validate(load_graph(name))
+        if load_status(name).get("state") != "live":
+            live = sum(
+                load_status(d.name).get("state") == "live"
+                for d in cfg.data_dir.iterdir() if d.is_dir() and SLUG.fullmatch(d.name)
+            )
+            if live >= cfg.max_live_graphs:
+                raise HTTPException(429, "live graph limit reached")
+        await fabric.stop_observer(name)  # converge: restart cleanly if already live
+        try:
+            out = await asyncio.to_thread(
+                provision, graph, cfg.data_dir, cfg.agent_image, cfg.nats_image,
+                ROOT / "agentd", cfg,
+            )
+        except ProvisionError as e:
+            raise HTTPException(500, str(e))
+        d = graph_dir(name)
+        try:
+            await fabric.start_observer(d, name, {c.id: c.from_ for c in graph.channels})
+        except RuntimeError as e:
+            raise HTTPException(503, f"provisioned, but observer cannot reach the broker yet: {e}")
+        return {"status": "live", **out}
 
 
 @app.get("/api/graphs/{name}/agents/{aid}")
@@ -286,7 +331,8 @@ def traffic(name: str, after: int = 0) -> dict:
 
 @app.delete("/api/graphs/{name}")
 async def delete_graph(name: str) -> dict:
-    graph = load_graph(name)
-    await fabric.stop_observer(name)
-    await asyncio.to_thread(teardown, Graph.model_validate(graph), cfg.data_dir)
-    return {"deleted": name}
+    async with _lifecycle_lock:
+        graph = load_graph(name)
+        await fabric.stop_observer(name)
+        await asyncio.to_thread(teardown, Graph.model_validate(graph), cfg.data_dir)
+        return {"deleted": name}

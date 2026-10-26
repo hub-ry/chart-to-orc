@@ -115,10 +115,12 @@ def provision(
             indent=2,
         ))
         return out
-    except Exception:
+    except Exception as error:
         _teardown_containers(graph.name, known)
         _remove_volumes(graph.name, created_volumes)
-        _write_private(d / "status.json", json.dumps({"state": "failed"}))
+        _write_private(d / "status.json", json.dumps({
+            "state": "failed", "error": f"{type(error).__name__}: provisioning failed",
+        }))
         raise
 
 

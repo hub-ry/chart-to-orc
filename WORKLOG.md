@@ -265,3 +265,28 @@ ran an actual ASGI prompt through the agent with a failing mock LLM, fake broker
 and real observer: HTTP 200 result, valid:true, preserved lineage, hop 1, and
 HTTP 408 for an absent conversation. No provider requests, services or containers
 were used. Remaining eval failures are TTL and graph capacity, outside this task.
+
+## Graph lifecycle admission and expiry
+
+Added `ORC_GRAPH_TTL_SECONDS` (default `0`, disabled) and
+`ORC_MAX_LIVE_GRAPHS` (default `5`). Enabling a positive TTL will tear down old
+live graphs, including their workspace volumes. A lifespan-owned task checks
+every 60 seconds, stops the observer, removes inventoried resources and marks
+status expired while retaining specs/logs. Age is measured from successful
+provisioning; reaccept resets it. Exact TTL boundaries are retained.
+
+One lifecycle lock serializes accept, delete and GC, including capacity checks;
+concurrent accepts cannot both take the final slot. Live reaccept is allowed.
+Existing inventory rollback and departed-agent cleanup already satisfy this
+task and still pass their offline resource-state evals. Failed status now also
+contains a short error category, without embedding command arguments or secrets.
+
+The future-facing TTL eval incorrectly required deletion of all graph data.
+Updated only that assertion to require the requested expired status; container
+and volume cleanup assertions remain. No cases removed or weakened.
+Eval score before -> after: 39/43 (90.70%) -> 43/43 (100.00%).
+All 176 tests pass, with one existing Starlette/httpx deprecation warning.
+Offline ASGI/captured-command evals exercise failed provision, departed agents,
+capacity and TTL. A separate real app lifespan smoke observed background GC
+remove expired resources, preserve a fresh graph and finish shutdown, with
+mocked broker/proxy/Docker operations. No live services or provider calls used.

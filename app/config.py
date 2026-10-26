@@ -44,6 +44,8 @@ class Config:
     graph_max_seconds: float = 1800
     api_token: str = ""
     allow_no_auth: bool = False
+    graph_ttl_seconds: float = 0
+    max_live_graphs: int = 5
 
     @classmethod
     def load(cls, extra: dict[str, str] | None = None) -> "Config":
@@ -81,4 +83,6 @@ class Config:
             graph_max_seconds=float(get("ORC_GRAPH_MAX_SECONDS", "1800")),
             api_token=get("ORC_API_TOKEN"),
             allow_no_auth=get("ORC_ALLOW_NO_AUTH") == "1",
+            graph_ttl_seconds=float(get("ORC_GRAPH_TTL_SECONDS", "0")),
+            max_live_graphs=int(get("ORC_MAX_LIVE_GRAPHS", "5")),
         )

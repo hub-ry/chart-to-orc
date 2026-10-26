@@ -374,7 +374,8 @@ async def _ttl(ctx, mode):
     async with _client(main.app, cfg.api_token) as client:
         response = await client.get("/api/graphs/g")
     if mode == "expired":
-        ctx.require(response.status_code == 404 and not directory.exists(), "expired live graph was not removed")
+        ctx.require(response.status_code == 200 and response.json()["status"] == "expired",
+                    "expired live graph was not marked expired")
         ctx.require(any(args[:3] == ("docker", "rm", "-f") for args in commands), "expired containers not torn down")
         ctx.require(any(args[:3] == ("docker", "volume", "rm") for args in commands), "expired volumes not removed")
     else:

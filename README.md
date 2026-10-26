@@ -121,6 +121,19 @@ Both call and runtime limits must be positive.
 Existing running containers retain their old environment until explicitly
 re-provisioned. This change does not alter running containers automatically.
 
+## Graph lifecycle
+
+`ORC_MAX_LIVE_GRAPHS` defaults to `5`. Accepting a new live graph at capacity
+returns HTTP 429 without changing its draft; reaccepting a live graph is allowed.
+Run one worker so lifecycle admission and teardown share the same lock.
+
+`ORC_GRAPH_TTL_SECONDS` defaults to `0` (disabled). A positive value enables
+cleanup roughly every 60 seconds, based on `status.json`'s `provisioned_at`
+(reset on successful reaccept). Enabling it **tears down old live graphs**,
+including their workspace volumes. Cleanup stops the observer and removes the
+containers, networks and volumes, then marks status `expired`. Specs and logs
+remain available; reaccept recreates resources. Exact TTL boundaries remain live.
+
 ## Results and waiting
 
 Agents publish `kind: "result"` with `body: {"ok": false, "error": "..."}` on
