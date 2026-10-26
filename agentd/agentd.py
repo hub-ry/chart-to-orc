@@ -174,6 +174,9 @@ def build_tools():
                 "parameters": {"type": "object", "properties": {}},
             },
         },
+    ]
+    if "shell" in TOOLS_LIST:
+        tools += [
         {
             "type": "function",
             "function": {
@@ -186,7 +189,7 @@ def build_tools():
                 },
             },
         },
-    ]
+        ]
     if "browser" in TOOLS_LIST:
         tools += [
             {
@@ -556,6 +559,10 @@ async def vision_describe(image_b64: str, prompt: str) -> str:
 
 
 async def execute_tool(name, args, sent):
+    if name == "shell" and "shell" not in TOOLS_LIST:
+        return err("shell tool is disabled")
+    if name.startswith("browser_") and "browser" not in TOOLS_LIST:
+        return err("browser tools are disabled")
     if name == "send":
         return await tool_send(args, sent)
     if name == "read_file":

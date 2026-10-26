@@ -44,7 +44,7 @@ Lives on hub, single user, tailnet-visible.
 ```
 
 Rules (enforced by `Graph`, not prose): ids are slugs `^[a-z][a-z0-9_-]{0,31}$`, unique;
-channel endpoints must be agents; no self-loops; tools ⊆ {workspace, browser};
+channel endpoints must be agents; no self-loops; tools ⊆ {workspace, browser, shell};
 kinds ⊆ {text, artifact, result}; ≥1 agent. Channels are directional — a two-way
 conversation is two arrows, two channels.
 
