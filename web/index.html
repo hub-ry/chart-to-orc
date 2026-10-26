@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chart-to-orc</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>chart-to-orc</h1>
+  <span id="health" class="muted"></span>
+</header>
+<main>
+  <section class="card">
+    <h2>1 · draw</h2>
+    <input type="file" id="drawing" accept="image/*">
+    <img id="preview" hidden alt="drawing preview">
+    <button id="compile-drawing" disabled>compile drawing</button>
+    <details>
+      <summary>no vision? paste a JSON spec instead</summary>
+      <textarea id="spec" rows="12" spellcheck="false" placeholder='{"name":"…","agents":[…],"channels":[…]}'></textarea>
+      <button id="compile-spec">compile spec</button>
+    </details>
+    <p id="msg" class="muted"></p>
+  </section>
+  <section class="card" id="result" hidden>
+    <h2>2 · compiled graph</h2>
+    <div id="graph"></div>
+  </section>
+  <section class="card">
+    <h2>graphs</h2>
+    <ul id="graphs"></ul>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
