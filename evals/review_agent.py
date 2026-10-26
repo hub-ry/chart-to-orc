@@ -1,8 +1,14 @@
 """Offline review regressions; process and environment probes use fixtures only."""
 import asyncio
 import copy
+import io
 import json
+import os
+import shlex
+import signal
+import sys
 import tracemalloc
+from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -122,6 +128,98 @@ async def shell_bounded_capture(ctx):
                 "bounded capture must preserve exit status, UTF-8 replacement and character-prefix semantics")
 
 
+async def shell_escaped_pipe_timeout(ctx):
+    a = ctx.agent()
+    a.TOOLS_LIST = ["shell"]
+    a.SHELL_TIMEOUT = 0.2
+    child_file = Path(a.WORKSPACE) / "escaped.pid"
+    # Record the PID before escaping: if setup fails before that write, killpg
+    # still owns the child. Only stderr stays inherited after setsid.
+    code = (
+        "import os, time; from pathlib import Path; "
+        f"pidfile = Path({str(child_file)!r}); "
+        "pidfile.with_suffix('.tmp').write_text(str(os.getpid())); "
+        "pidfile.with_suffix('.tmp').replace(pidfile); "
+        "os.setsid(); os.close(1); time.sleep(30)"
+    )
+    command = f"{shlex.quote(sys.executable)} -c {shlex.quote(code)} & wait"
+    processes = []
+    ready_at = None
+    create = asyncio.create_subprocess_shell
+
+    async def capture(*args, **kwargs):
+        nonlocal ready_at
+        proc = await create(*args, **kwargs)
+        processes.append(proc)
+        for _ in range(100):
+            if child_file.exists():
+                child = int(child_file.read_text())
+                if os.getsid(child) == child:
+                    ready_at = asyncio.get_running_loop().time()
+                    return proc
+            await asyncio.sleep(0.01)
+        ctx.require(False, "escaped stderr-holder fixture must become ready")
+
+    ctx.patch("asyncio.create_subprocess_shell", capture)
+    try:
+        # The baseline hangs after killpg; this outer bound must fail promptly.
+        result = json.loads(await asyncio.wait_for(
+            a.execute_tool("shell", {"cmd": command}, {}), 3))
+        elapsed = asyncio.get_running_loop().time() - ready_at
+        ctx.require(result.get("ok") is False and "timed out" in result.get("error", ""),
+                    "escaped inherited stderr must still return a shell timeout error")
+        ctx.require(elapsed < a.SHELL_TIMEOUT + 1,
+                    "escaped pipe must not extend timeout beyond a short reap grace")
+        ctx.require(processes[0].returncode is not None, "timed-out shell must be reaped")
+    finally:
+        # Cleanup is the fixture's responsibility, not a containment guarantee
+        # from the shell tool. It must also run when the outer deadline fails.
+        for proc in processes:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if child_file.exists():
+            child = int(child_file.read_text())
+            try:
+                os.kill(child, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            for _ in range(100):
+                try:
+                    stopped = Path(f"/proc/{child}/stat").read_text().split()[2] == "Z"
+                except FileNotFoundError:
+                    stopped = True
+                if stopped:
+                    break
+                await asyncio.sleep(0.01)
+            ctx.require(stopped, "escaped fixture child must not survive eval cleanup")
+        for proc in processes:
+            await asyncio.wait_for(proc.wait(), 1)
+
+
+async def broker_connect_error_redaction(ctx):
+    a = ctx.agent()
+    password = "fixture-broker-password"
+    url = f"nats://fixture-user:{password}@broker.invalid:4333"
+    attempts = []
+
+    async def fail_connect(*args, **kwargs):
+        attempts.append((args, kwargs))
+        raise RuntimeError(f"failed to connect using {url}")
+
+    ctx.patch("nats.connect", fail_connect)
+    captured = io.StringIO()
+    with redirect_stdout(captured):
+        result = await a.connect_nats(url)
+    output = captured.getvalue()
+    ctx.require(result is None and len(attempts) == 1, "fixture must exercise broker connect failure")
+    ctx.require(password not in output and "fixture-user" not in output,
+                "broker failure logs must omit URL credentials and credential-bearing exception text")
+    ctx.require("broker.invalid" in output and "4333" in output and "RuntimeError" in output,
+                "broker failure logs must retain sanitized host, port and exception type")
+
+
 async def receiver_subject_identity(ctx):
     from evals.agent_cases import envelope, reply
 
@@ -201,4 +299,6 @@ CASES = [
     ("2", "review_workspace_permission_advertisement_and_dispatch", workspace_permissions),
     ("14", "review_shell_capture_bounds_while_draining", shell_bounded_capture),
     ("3", "review_receiver_subject_identity", receiver_subject_identity),
+    ("7", "review_shell_timeout_with_escaped_stderr_holder", shell_escaped_pipe_timeout),
+    ("10", "review_broker_connect_error_redacts_credentials", broker_connect_error_redaction),
 ]

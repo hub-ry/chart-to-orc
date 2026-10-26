@@ -420,7 +420,14 @@ async def tool_shell(args):
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        await completion
+        try:
+            await asyncio.wait_for(asyncio.shield(completion), timeout=0.25)
+        except asyncio.TimeoutError:
+            # A descendant can escape the group and retain a pipe. Bound the
+            # reap grace, then release our pipes without claiming containment.
+            completion.cancel()
+            proc._transport.close()
+            await asyncio.gather(completion, return_exceptions=True)
         return err(f"shell command timed out after {SHELL_TIMEOUT}s")
     except Exception as e:
         return err(str(e))
@@ -782,7 +789,7 @@ async def connect_nats(nats_url):
         return nc
     except Exception as e:
         print(
-            json.dumps({"event": "connect_error", "error": f"could not connect to NATS at {nats_url}: {e}"}),
+            json.dumps({"event": "connect_error", "error": f"could not connect to NATS at {host}:{port}: {type(e).__name__}"}),
             flush=True,
         )
         return None

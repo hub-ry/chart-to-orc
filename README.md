@@ -193,7 +193,11 @@ the host-side spending backstop.
 
 Only grant shell access to trusted workloads. Timeout cleanup kills the command's
 process group, not descendants that create a new session (`setsid`/double-fork).
-Commands may also leave background processes after a successful exit. Workspace
+After a 0.25-second reap grace it closes retained pipes and returns a timeout
+error even if an escaped descendant is still running. Commands may also leave
+background processes after a successful exit. Broker connection errors log
+only host, port and exception type, never the credential URL or exception text.
+Workspace
 volumes and container writable layers have no portable disk quota here; deploy
 on quota-managed storage if disk exhaustion is a concern. Budget exhaustion
 does not stop containers. Docker isolation is not a complete hostile-code sandbox.

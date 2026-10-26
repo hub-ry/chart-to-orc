@@ -41,3 +41,4 @@
 {"ts": "2026-10-26T05:13:55.789411+00:00", "commit": "681370f", "dirty": true, "label": "before-review-end-proxy", "passed": 51, "total": 54, "score": 94.44444444444444, "failed": ["ambiguous_upstream_failure_closes_persisted_budget", "proxy_requires_explicit_bind_address", "proxy_rejects_concurrent_worker_ownership"]}
 {"ts": "2026-10-26T05:14:24.939845+00:00", "commit": "681370f", "dirty": true, "label": "after-review-end-runtime", "passed": 54, "total": 54, "score": 100.0, "failed": []}
 {"ts": "2026-10-26T05:14:56.183273+00:00", "commit": "681370f", "dirty": true, "label": "after-review-end-lifecycle", "passed": 54, "total": 54, "score": 100.0, "failed": []}
+{"ts": "2026-10-26T05:15:16.981812+00:00", "commit": "29ff425", "dirty": true, "label": "after-review-end-agent", "passed": 54, "total": 54, "score": 100.0, "failed": []}

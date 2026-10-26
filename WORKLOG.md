@@ -399,3 +399,19 @@ including independently added config/agent/proxy cases. Original 43 cases still
 pass. All 176 tests pass (one existing Starlette/httpx deprecation warning).
 ASGI accept and real cleanup code exercised captured Docker commands and status
 transitions; actual container cleanup was not run.
+
+### Agent timeout and error boundaries
+
+- Grok 7 / DeepSeek 1: real. Bound post-kill reaping to 0.25 seconds and close
+  subprocess transports if an escaped descendant holds a pipe. This returns the
+  timeout error; it does not contain or kill descendants outside the process group.
+- Grok 10: real. NATS failure logs now include host/port and exception type only,
+  excluding both the credential URL and potentially credential-bearing exception.
+  No new environment variables.
+
+Eval-first: escaped-stderr and credential-log cases both failed. Eval score before
+-> after: 47/51 (92.16%) -> 54/54 (100.00%) integrated tree. All 176 tests pass.
+The shell eval launches a real local setsid child, confirms bounded error return
+and kills its fixture child in finally; the broker refusal uses a mock exception.
+The eval runner labels the outer deadline TimeoutError as its generic safety
+timeout; the failing run finished in five seconds, not twenty.
