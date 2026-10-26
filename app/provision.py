@@ -16,12 +16,13 @@ them from the current graph spec, so it converges.
 from __future__ import annotations
 
 import json
+import os
 import socket
 import subprocess
 import time
 from pathlib import Path
 
-from app.schema import Graph
+from app.schema import Graph, SLUG
 from app.config import Config
 from app.proxy import graph_token
 
@@ -49,11 +50,41 @@ def ensure_agent_image(image: str, build_dir: Path) -> None:
     _run("docker", "build", "-t", image, str(build_dir))
 
 
-def _teardown_containers(graph: Graph) -> None:
-    _run("docker", "rm", "-f", f"orc-{graph.name}-nats", check=False)
-    for a in graph.agents:
-        _run("docker", "rm", "-f", f"orc-{graph.name}-{a.id}", check=False)
-        _run("docker", "network", "rm", f"orc-{graph.name}-{a.id}", check=False)
+def _write_private(path: Path, text: str) -> None:
+    if path.exists():
+        path.chmod(0o600)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as file:
+        os.fchmod(file.fileno(), 0o600)
+        file.write(text)
+        file.flush()
+        os.fsync(file.fileno())
+    temporary.replace(path)
+
+
+def _tracked_agents(directory: Path) -> set[str]:
+    inventory = directory / "resources.json"
+    if inventory.exists():
+        ids = json.loads(inventory.read_text())["agents"]
+        if not isinstance(ids, list) or any(not isinstance(aid, str) or not SLUG.fullmatch(aid) for aid in ids):
+            raise ProvisionError("invalid provision resource inventory")
+        return set(ids)
+    # Migrate existing graphs once; subsequent updates can overwrite graph.json.
+    spec = directory / "graph.json"
+    return {a.id for a in Graph.model_validate_json(spec.read_text()).agents} if spec.exists() else set()
+
+
+def _teardown_containers(name: str, agents: set[str]) -> None:
+    _run("docker", "rm", "-f", f"orc-{name}-nats", check=False)
+    for aid in sorted(agents):
+        _run("docker", "rm", "-f", f"orc-{name}-{aid}", check=False)
+        _run("docker", "network", "rm", f"orc-{name}-{aid}", check=False)
+
+
+def _remove_volumes(name: str, agents: set[str]) -> None:
+    for aid in sorted(agents):
+        _run("docker", "volume", "rm", f"orc-{name}-{aid}-ws", check=False)
 
 
 def provision(
@@ -67,22 +98,58 @@ def provision(
     d = data_dir / graph.name
     d.mkdir(parents=True, exist_ok=True)
     token = graph_token(d, cfg)
-    proxy_url = f"http://host.docker.internal:{cfg.proxy_port}"
+    previous = _tracked_agents(d)
+    current = {a.id for a in graph.agents}
+    known = previous | current
+    # Save intent before any Docker mutation, independently of the editable spec.
+    _write_private(d / "resources.json", json.dumps({"agents": sorted(known)}))
+    _write_private(d / "status.json", json.dumps({"state": "provisioning"}))
+    created_volumes: set[str] = set()
+    try:
+        _teardown_containers(graph.name, known)
+        _remove_volumes(graph.name, previous - current)
+        out = _start(graph, d, agent_image, nats_image, build_dir, cfg, token, created_volumes)
+        _write_private(d / "resources.json", json.dumps({"agents": sorted(current)}))
+        _write_private(d / "status.json", json.dumps(
+            {"state": "live", "nats_port": out["nats_port"], "provisioned_at": time.time()},
+            indent=2,
+        ))
+        return out
+    except Exception:
+        _teardown_containers(graph.name, known)
+        _remove_volumes(graph.name, created_volumes)
+        _write_private(d / "status.json", json.dumps({"state": "failed"}))
+        raise
 
-    _teardown_containers(graph)
+
+def _start(
+    graph: Graph,
+    d: Path,
+    agent_image: str,
+    nats_image: str,
+    build_dir: Path,
+    cfg: Config,
+    token: str,
+    created_volumes: set[str],
+) -> dict:
+    proxy_url = f"http://host.docker.internal:{cfg.proxy_port}"
 
     conf, passwords = graph.nats_users()
     conf += "\nport: 4222\nmax_payload: 1048576\n"
-    (d / "nats.conf").write_text(conf)
+    _write_private(d / "nats.conf", conf)
 
     ensure_agent_image(agent_image, build_dir)
 
     port = free_port()
     user = f"orc-{graph.name}-user"
-    (d / "user.env").write_text(f'NATS_URL="nats://{user}:{passwords[user]}@127.0.0.1:{port}"\n')
+    _write_private(d / "user.env", f'NATS_URL="nats://{user}:{passwords[user]}@127.0.0.1:{port}"\n')
 
     for a in graph.agents:
         _run("docker", "network", "create", "--driver", "bridge", f"orc-{graph.name}-{a.id}")
+        volume = f"orc-{graph.name}-{a.id}-ws"
+        if not _run("docker", "volume", "inspect", volume, check=False):
+            # Include a possibly-created volume even if its create command fails.
+            created_volumes.add(a.id)
         _run("docker", "volume", "create", f"orc-{graph.name}-{a.id}-ws")
 
     # nats container, multi-homed on every per-agent network, host-loopback port for the app
@@ -146,6 +213,7 @@ def provision(
             "--network", f"orc-{graph.name}-{a.id}",
             "--add-host", "host.docker.internal:host-gateway",
             "--memory", f"{a.memory_mb}m", "--cpus", str(a.cpus),
+            "--pids-limit", "256",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "-v", f"orc-{graph.name}-{a.id}-ws:/workspace",
         ]
@@ -162,19 +230,13 @@ def provision(
         if not p.exists():
             p.write_text(f"# {a.name or a.id}\n\n## role\n{a.system}\n\n## log\n\n")
 
-    (d / "status.json").write_text(
-        json.dumps(
-            {"state": "live", "nats_port": port, "provisioned_at": time.time()},
-            indent=2,
-        )
-    )
     return {"nats_port": port, "agents": [a.id for a in graph.agents]}
 
 
 def teardown(graph: Graph, data_dir: Path, rm_data: bool = True) -> None:
-    _teardown_containers(graph)
-    for a in graph.agents:
-        _run("docker", "volume", "rm", f"orc-{graph.name}-{a.id}-ws", check=False)
+    agents = _tracked_agents(data_dir / graph.name) | {a.id for a in graph.agents}
+    _teardown_containers(graph.name, agents)
+    _remove_volumes(graph.name, agents)
     if rm_data:
         import shutil
 

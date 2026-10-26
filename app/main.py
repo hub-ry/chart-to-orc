@@ -6,7 +6,6 @@ import asyncio
 import base64
 import hmac
 import json
-import shutil
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -276,11 +275,6 @@ def traffic(name: str, after: int = 0) -> dict:
 @app.delete("/api/graphs/{name}")
 async def delete_graph(name: str) -> dict:
     graph = load_graph(name)
-    if load_status(name).get("state") == "live":
-        await fabric.stop_observer(name)
-        await asyncio.to_thread(teardown, Graph.model_validate(graph), cfg.data_dir)
-    else:
-        d = graph_dir(name)
-        if d.is_dir():
-            shutil.rmtree(d)
+    await fabric.stop_observer(name)
+    await asyncio.to_thread(teardown, Graph.model_validate(graph), cfg.data_dir)
     return {"deleted": name}

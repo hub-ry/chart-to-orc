@@ -515,3 +515,8 @@ CASES = [
     ("13", "reprovision tears down agents removed from graph", removed_agent_teardown),
     ("D", "proxy forces configured upstream URL credentials and model", forced_proxy_routing),
 ]
+
+
+from evals.review_provision import CASES as review_provision_cases
+
+CASES += review_provision_cases

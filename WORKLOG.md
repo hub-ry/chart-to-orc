@@ -186,3 +186,21 @@ Eval score before -> after (integrated tree): 20/43 (46.51%) -> 32/43 (74.42%).
 All 160 tests passed. Existing evals ran local printf and same-group timeout paths;
 a separate real local shell emitted 1,000,000 characters on each stream and
 returned exit 0 with exactly 8192 captured per stream. No real env/proc reads.
+
+### Provision credentials and resource lifecycle
+Grok 4 / DeepSeek 3: create/replace broker credential files with mode 0600,
+including repair on reaccept. Grok 7 / DeepSeek 6: record intended resource ids
+in resources.json before Docker mutations, rollback failures, mark status failed,
+and clean resources even when DELETE sees a non-live status. DeepSeek 5: remove
+departed-agent containers, networks and workspaces using that independent inventory,
+even if graph.json was overwritten; retain continuing-agent workspace volumes.
+Grok 3: add a fixed 256-process container limit; no disk-quota claim.
+No new environment variables.
+
+Eval-first: all seven new provision regressions failed, as did both existing
+lifecycle cases. Eval score before -> after (integrated tree): 19/40 (47.50%) ->
+32/43 (74.42%). The first provision-only measurement hit a concurrent harness import
+error before recording a score; the recorded before run above verified the same
+failures before implementation. All 160 tests passed. Mock Docker state exercised
+fresh/failed reaccept, overwritten specs, private files and pending deletion; actual
+Docker/network/volume behavior was not exercised under the session restrictions.

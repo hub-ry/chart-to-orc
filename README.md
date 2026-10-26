@@ -159,6 +159,13 @@ does not stop containers. Docker isolation is not a complete hostile-code sandbo
   `orc-<graph>-<agent>` container + bridge network + `-ws` volume.
 - `DELETE /api/graphs/<name>` tears containers down and removes the data dir.
 
+`nats.conf` and `user.env` are private (0600). `resources.json` records intended
+agent ids before provisioning changes, independently of the editable graph spec.
+Failed provisioning removes containers/networks and newly created workspaces,
+marks the graph failed, and preserves existing retained workspaces. Reaccept
+removes departed agents' resources; DELETE cleans inventoried resources regardless
+of status. Agent containers have a 256-process limit.
+
 ## Tests
 
 ```bash
