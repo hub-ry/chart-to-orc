@@ -303,3 +303,18 @@ is no broker-side per-channel rate cap. No new environment variables.
 Eval score before -> after: 43/43 (100.00%) -> 43/43 (100.00%).
 All 176 offline tests pass; one existing Starlette/httpx warning remains.
 No broker or container was started; broker enforcement itself was not exercised.
+
+## Open-source licensing and portable deployment
+
+Added the MIT license, copyright 2026 chart-to-orc contributors. The service
+template uses YOUR_USER/YOUR_GROUP, `/opt/chart-to-orc` and
+`/etc/chart-to-orc/env`, explicitly sets the matching data directory, and keeps
+the API bound to 127.0.0.1. README explains adapting these paths and permissions.
+Removed personal server/credential references from docs and the config header.
+No new environment variables.
+
+The public source/docs/config scan found no remaining personal identifiers
+from the requested list (dependency/code words are not personal references).
+Eval score before -> after: 43/43 (100.00%) -> 43/43 (100.00%).
+All 176 tests pass, with the existing Starlette/httpx warning. No service file
+was installed and no service or container was changed; deployment is operator-run.

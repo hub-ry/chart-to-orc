@@ -2,7 +2,7 @@
 
 Draw a chart. Get a running graph of blind agents — each in its own Docker container,
 reachable only through filtered channels, each a clickable markdown file you can prompt.
-Lives on hub, single user, tailnet-visible.
+Runs on your server, for a single user, with private access.
 
 ## Outcome (in-your-own-words)
 
@@ -117,15 +117,15 @@ limit, so direct publishing can flood allowed subjects. Subject ACLs still apply
 | chart parse | vision LLM / only JSON paste | both | vision is the product UX; JSON paste is the escape hatch when no vision-capable key is configured |
 | computer use | remote sandbox API / shared browser MCP (Bladebro) / Playwright per agent | Playwright inside each agent's container | no remote provider available; a shared browser would share cookies/sessions and break blindness (I1); per-agent Chromium keeps isolation structural — also the stack Lauren Tan's pstack uses |
 
-## Layout on hub (follows hub convention)
+## Server layout
 
 - Repo: `~/chart-to-orc` (git). Data: `~/chart-to-orc/data/<graph>/{graph.json,status.json,drawing.*,agents/<id>.md}`.
 - Secrets: `~/.config/chart-to-orc/env` (chmod 600) — `DEEPSEEK_API_KEY`, optional
   `OPENAI_API_KEY` / `ORC_VISION_*` for the vision parser.
 - Serve: main uvicorn API on loopback `127.0.0.1:8787`, separate proxy on
   `0.0.0.0:8788` by default. See README for bridge ingress and private UI access.
-- Agent brain: DeepSeek (`deepseek-chat`, OpenAI-compatible) — the key already present on
-  hub for spons (`/etc/spons/environment`); copy into the chart-to-orc env file.
+- Agent brain: DeepSeek (`deepseek-chat`, OpenAI-compatible) by default.
+  Configure your own provider key in the chart-to-orc env file.
 
 ## Stolen from pstack (cursor/plugins, Lauren Tan)
 

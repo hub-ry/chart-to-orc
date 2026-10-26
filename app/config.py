@@ -1,4 +1,4 @@
-"""Config from env + ~/.config/chart-to-orc/env (hub convention, chmod 600)."""
+"""Config from env + ~/.config/chart-to-orc/env (chmod 600)."""
 
 from __future__ import annotations
 

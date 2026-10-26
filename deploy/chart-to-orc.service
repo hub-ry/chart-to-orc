@@ -1,4 +1,4 @@
-# chart-to-orc: web app + observer, on hub.
+# chart-to-orc: web app + observer, on your server.
 # Install: sudo cp deploy/chart-to-orc.service /etc/systemd/system/ && sudo systemctl enable --now chart-to-orc
 [Unit]
 Description=chart-to-orc: draw charts, run blind agents
@@ -7,12 +7,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ryanhubbart
-Group=ryanhubbart
-WorkingDirectory=/home/ryanhubbart/chart-to-orc
-# 0600, holds DEEPSEEK_API_KEY (hub convention)
-EnvironmentFile=/home/ryanhubbart/.config/chart-to-orc/env
-ExecStart=/home/ryanhubbart/chart-to-orc/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8787
+User=YOUR_USER
+Group=YOUR_GROUP
+WorkingDirectory=/opt/chart-to-orc
+# Adapt paths/user/group before installing. Env file must be private (0600).
+EnvironmentFile=/etc/chart-to-orc/env
+ExecStart=/opt/chart-to-orc/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8787
+Environment=ORC_DATA_DIR=/opt/chart-to-orc/data
 Restart=always
 RestartSec=5
 
@@ -21,7 +22,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/home/ryanhubbart/chart-to-orc/data
+ReadWritePaths=/opt/chart-to-orc/data
 
 [Install]
 WantedBy=multi-user.target

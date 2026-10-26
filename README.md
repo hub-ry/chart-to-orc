@@ -2,7 +2,7 @@
 
 Draw a chart. It compiles to a graph of **blind agents** — each in its own Docker
 container, reachable only through filtered NATS channels, each a clickable markdown
-file you can prompt. Runs on hub, single user, tailnet-visible.
+file you can prompt. Runs on your server, for a single user, with private access.
 
 Architecture and contracts: [DESIGN.md](DESIGN.md).
 
@@ -34,6 +34,12 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8787
 
 Open `http://127.0.0.1:8787` locally or through a private tunnel. The supplied
 `deploy/chart-to-orc.service` also binds the main API to loopback.
+
+For the service template, replace `YOUR_USER`/`YOUR_GROUP` and adapt the
+`/opt/chart-to-orc` paths before installing. It reads `/etc/chart-to-orc/env`
+and explicitly sets `ORC_DATA_DIR=/opt/chart-to-orc/data`; create that directory
+writable by the service user. Keep the env file private (0600). Interactive
+runs also load `~/.config/chart-to-orc/env`; avoid conflicting settings there.
 
 ## API authentication
 
