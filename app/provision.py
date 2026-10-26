@@ -168,6 +168,8 @@ def provision(
 
 def teardown(graph: Graph, data_dir: Path, rm_data: bool = True) -> None:
     _teardown_containers(graph)
+    for a in graph.agents:
+        _run("docker", "volume", "rm", f"orc-{graph.name}-{a.id}-ws", check=False)
     if rm_data:
         import shutil
 

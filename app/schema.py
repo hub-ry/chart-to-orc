@@ -163,7 +163,7 @@ class Graph(BaseModel):
                     "password": upwd,
                     "permissions": {
                         "publish": [self.subject("in", ">")],
-                        "subscribe": [self.subject(">", ">")],
+                        "subscribe": [f"orc.{self.name}.>"],
                     },
                 }
             )

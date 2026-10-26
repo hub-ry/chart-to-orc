@@ -115,7 +115,7 @@ def test_permissions_grant_exactly_the_drawn_edges():
 
     user = next(u for u in json.loads(pw_key(block)) if u["user"] == "orc-ship-docs-user")
     assert user["permissions"]["publish"] == ["orc.ship-docs.in.>"]
-    assert user["permissions"]["subscribe"] == ["orc.ship-docs.>.>"]
+    assert user["permissions"]["subscribe"] == ["orc.ship-docs.>"]
 
     assert set(pw) == {"orc-ship-docs-researcher", "orc-ship-docs-writer", "orc-ship-docs-user"}
 

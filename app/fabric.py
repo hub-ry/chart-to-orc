@@ -37,7 +37,10 @@ async def get_conn(graph_dir: Path, name: str):
     url = _user_url(graph_dir)
     if not url:
         raise RuntimeError("graph has no observer credentials (not live?)")
-    nc = await nats.connect(url)
+    try:
+        nc = await nats.connect(url, connect_timeout=5, max_reconnect_attempts=0)
+    except Exception as e:
+        raise RuntimeError(f"nats unreachable: {e}") from e
     _connections[name] = nc
     return nc
 
@@ -46,7 +49,7 @@ async def start_observer(graph_dir: Path, name: str) -> None:
     if name in _observers:
         return
     nc = await get_conn(graph_dir, name)
-    sub = await nc.subscribe(f"orc.{name}.>.>")
+    sub = await nc.subscribe(f"orc.{name}.>")
     _observers[name] = asyncio.create_task(_persist(sub, graph_dir))
 
 
@@ -65,28 +68,27 @@ async def _persist(sub, graph_dir: Path) -> None:
     log = graph_dir / "traffic.jsonl"
     md_dir = graph_dir / "agents"
     while True:
-        msg = await sub.next_msg()
+        msg = await sub.next_msg(timeout=None)
         try:
             data = msg.data.decode()
             obj = json.loads(data)
         except (UnicodeDecodeError, json.JSONDecodeError):
             continue
-        with log.open("a") as f:
-            f.write(data + "\n")
         try:
+            with log.open("a") as f:
+                f.write(data + "\n")
             if log.stat().st_size > MAX_LOG_BYTES:
                 lines = log.read_text().splitlines()[-TRAFFIC_CAP_LINES:]
                 log.write_text("\n".join(lines) + "\n")
-        except OSError:
-            pass
-        line = _md_line(obj)
-        if line and md_dir.is_dir():
-            p = md_dir / f"{obj['src']}.md"
-            try:
+            line = _md_line(obj)
+            if line and md_dir.is_dir():
+                p = md_dir / f"{obj['src']}.md"
                 with p.open("a") as f:
                     f.write(line)
-            except OSError:
-                pass
+        except Exception:
+            import traceback
+
+            traceback.print_exc()
 
 
 async def stop_observer(name: str) -> None:

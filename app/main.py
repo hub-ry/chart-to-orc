@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
                 status = json.loads((d / "status.json").read_text())
                 if status.get("state") == "live":
                     await fabric.start_observer(d, d.name)
-            except (OSError, json.JSONDecodeError):
+            except (OSError, json.JSONDecodeError, RuntimeError):
                 continue
     yield
 
@@ -153,8 +153,7 @@ def get_graph(name: str) -> dict:
 @app.post("/api/graphs/{name}/accept")
 async def accept_graph(name: str) -> dict:
     graph = Graph.model_validate(load_graph(name))
-    if load_status(name).get("state") == "live":
-        raise HTTPException(409, "already live")
+    await fabric.stop_observer(name)  # converge: restart cleanly if already live
     llm_env = {
         "base_url": cfg.llm_base_url,
         "api_key": cfg.llm_api_key,
@@ -169,7 +168,10 @@ async def accept_graph(name: str) -> dict:
     except ProvisionError as e:
         raise HTTPException(500, str(e))
     d = graph_dir(name)
-    await fabric.start_observer(d, name)
+    try:
+        await fabric.start_observer(d, name)
+    except RuntimeError as e:
+        raise HTTPException(503, f"provisioned, but observer cannot reach the broker yet: {e}")
     return {"status": "live", **out}
 
 
@@ -238,10 +240,9 @@ async def delete_graph(name: str) -> dict:
     graph = load_graph(name)
     if load_status(name).get("state") == "live":
         await fabric.stop_observer(name)
-        await asyncio.to_thread(
-            teardown, Graph.model_validate(graph), cfg.data_dir, rm_data=False
-        )
-    d = graph_dir(name)
-    if d.is_dir():
-        shutil.rmtree(d)
+        await asyncio.to_thread(teardown, Graph.model_validate(graph), cfg.data_dir)
+    else:
+        d = graph_dir(name)
+        if d.is_dir():
+            shutil.rmtree(d)
     return {"deleted": name}

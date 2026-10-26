@@ -221,7 +221,7 @@ def ok(msg):
     return tool_result({"ok": True, "result": msg})
 
 
-async def tool_send(args, sent_to_user):
+async def tool_send(args, sent):
     to = args.get("to")
     channel_id = args.get("channel_id")
     kind = args.get("kind")
@@ -240,7 +240,7 @@ async def tool_send(args, sent_to_user):
         ch_field = f"out.{AGENT_ID}"
         if kind not in USER_KINDS:
             return err(f"invalid kind {kind!r} for user")
-        sent_to_user["v"] = True
+        sent["user"] = True
     else:
         ch = OUT_BY_ID.get(channel_id)
         if ch is None:
@@ -273,6 +273,7 @@ async def tool_send(args, sent_to_user):
 
     full_subject = f"orc.{GRAPH}.{subject}"
     await NC.publish(full_subject, data)
+    sent["any"] = True
     log("sent", full_subject, envelope["msg_id"])
     return ok(f"sent on {full_subject}")
 
@@ -357,9 +358,9 @@ async def tool_computer_use(args):
     return ok(result)
 
 
-async def execute_tool(name, args, sent_to_user):
+async def execute_tool(name, args, sent):
     if name == "send":
-        return await tool_send(args, sent_to_user)
+        return await tool_send(args, sent)
     if name == "read_file":
         return tool_read_file(args)
     if name == "write_file":
@@ -425,7 +426,7 @@ async def handle_envelope(envelope, subject, trigger_is_in):
     messages.extend(HISTORY)
 
     tools = build_tools()
-    sent_to_user = {"v": False}
+    sent = {"user": False, "any": False}
     final_text = ""
     try:
         for _ in range(MAX_TOOL_CALLS):
@@ -444,7 +445,7 @@ async def handle_envelope(envelope, subject, trigger_is_in):
                         args = json.loads(fn.get("arguments") or "{}")
                     except Exception:
                         args = {}
-                    result = await execute_tool(name, args, sent_to_user)
+                    result = await execute_tool(name, args, sent)
                     messages.append(
                         {"role": "tool", "tool_call_id": tc.get("id", ""), "content": result}
                     )
@@ -458,7 +459,9 @@ async def handle_envelope(envelope, subject, trigger_is_in):
         log_llm_error(subject, e)
         return
 
-    if trigger_is_in and not sent_to_user["v"] and final_text.strip():
+    if not sent["any"] and final_text.strip():
+        # The model answered in plain text without using send. Route the reply
+        # to the operator rather than dropping it silently.
         publish_out(final_text, envelope.get("msg_id"))
 
 
