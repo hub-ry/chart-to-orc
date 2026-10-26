@@ -1,8 +1,8 @@
 # chart-to-orc
 
 Draw a chart. Get a running graph of blind agents — each in its own Docker container,
-reachable only through filtered channels, each a clickable markdown file you can prompt.
-Runs on your server, for a single user, with private access.
+with broker traffic restricted to filtered channels, each a clickable markdown file
+you can prompt. Runs on your server, for one trusted user.
 
 ## Outcome (in-your-own-words)
 
@@ -72,28 +72,30 @@ conversations, each retaining at most 20 messages.
 | `orc.<g>.in.<agent>` | user (UI) | that agent |
 | `orc.<g>.out.<agent>` | that agent | user (UI, live view) |
 
-Agent users get exactly their edges — no wildcards. The user account gets `in.>` publish
-and `>.>` subscribe (the eye of god, held by the app, never by an agent). Responses are
-not allowed (`allow_responses` off). This is the **encode-lessons-in-structure** fix:
-blindness is a broker ACL, not an instruction to the agent.
+Agent users get exactly their edges — no wildcards. The app's user account gets
+`orc.<g>.in.>` publish and `orc.<g>.>` subscribe, never shared with an agent.
+Generated permissions do not set `allow_responses` or grant dynamic reply access;
+the explicit publish/subscribe allow-lists define the intended broker boundary.
 
 ## Blindness invariants (what "completely blind" means here)
 
-- I1. No agent container shares a network with another agent container. Each agent lives
-  on its own bridge network; only the per-graph NATS container is attached to all of them.
-  → agents cannot resolve or route to each other at L2/L3.
+- I1. No agent container shares a Docker bridge with another agent container. Each
+  agent has its own bridge; only the per-graph NATS container joins all of them.
+  This separates the local bridges, not all external or forwarded network paths.
 - I2. NATS user per agent: publish allowed only on `ch.*` where it is `from` plus its own
   `out.*`; subscribe only on `ch.*` where it is `to` plus its own `in.*`. No wildcards.
-- I3. No shared volumes; no docker socket; each agent mounts only its own workspace and
-  read-only creds. No host paths beyond its own data dir.
+- I3. No shared workspace volumes or Docker socket. An agent mounts only its own
+  workspace volume; scoped NATS/proxy credentials are container environment values.
+  The host data directory and credential env files are not mounted into agents.
 - I4. The graph spec is never mounted into agent containers — each agent receives only its
   own slice (id, system, tools, subjects) as env/creds. It cannot read the graph file.
 - I5. Provisioning is one-shot. Provider credentials stay in the host app's separate
   LLM proxy; agents receive only a graph-scoped bearer token and proxy endpoints.
   The main API stays on loopback, outside the agent-facing listener.
-- I6. Agents communicate with peers only through broker subjects listed above.
-  The shared LLM proxy forwards independent requests without sharing agent history;
-  text and vision consume one persisted budget per graph.
+- I6. Broker-mediated peer messages are limited to the subjects listed above.
+  Browser and shell tools can use external HTTP/network paths; there is no built-in
+  egress confinement. The LLM proxy shares no agent history and meters text/vision
+  against one persisted budget per graph.
 
 ## Known limits
 
@@ -105,6 +107,19 @@ body limit. Receiving agents still enforce each channel's kinds and `max_bytes`.
 Send rate limits remain cooperative: there is no broker-side per-channel rate
 limit, so direct publishing can flood allowed subjects. Subject ACLs still apply.
 
+Browser access crosses the same network trust boundary as shell: arbitrary HTTP(S)
+destinations may include host-gateway services. The README INPUT example protects
+host ingress only; it does not constrain internet egress or Docker forwarding.
+Operators needing egress isolation must deploy an appropriate forwarding policy.
+These invariants do not prohibit agents coordinating through an external service.
+
+Management API credentials belong to the trusted single-user operator. Graph
+limits apply to agent proxy calls, not a host-global account allowance: deleting
+a graph removes its budget, and image compilation calls the host vision parser
+directly (up to three validation attempts). Total drafts/storage are not capped.
+Use provider-side account limits and storage quotas if those operator actions
+need an aggregate backstop.
+
 
 ## Design space (exhaust-the-design-space)
 
@@ -112,7 +127,7 @@ limit, so direct publishing can flood allowed subjects. Subject ACLs still apply
 |---|---|---|---|
 | isolation unit | Docker container / KVM microVM | container | 15G/6c host; seconds to provision; blindness needs information isolation, which netns+ACLs give; user chose container |
 | broker | NATS / MQTT / in-process | NATS 2.x, one container per graph | per-user publish/subscribe allow-lists are exactly the channel filter; single static binary; no plugins |
-| agent↔agent reachability | shared bridge / per-agent bridge | per-agent bridge + nats multi-homed | makes cross-agent IP reachability structurally impossible (I1) |
+| agent↔agent reachability | shared bridge / per-agent bridge | per-agent bridge + nats multi-homed | separates local agent bridges; external/forwarded paths need operator egress policy (I1) |
 | state | DB / shared KV / none | none | subtract-before-you-add: graph.json + per-agent markdown files + NATS are enough; a DB would become a de-facto shared brain and a blindness leak |
 | chart parse | vision LLM / only JSON paste | both | vision is the product UX; JSON paste is the escape hatch when no vision-capable key is configured |
 | computer use | remote sandbox API / shared browser MCP (Bladebro) / Playwright per agent | Playwright inside each agent's container | no remote provider available; a shared browser would share cookies/sessions and break blindness (I1); per-agent Chromium keeps isolation structural — also the stack Lauren Tan's pstack uses |

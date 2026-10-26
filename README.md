@@ -1,8 +1,8 @@
 # chart-to-orc
 
 Draw a chart. It compiles to a graph of **blind agents** — each in its own Docker
-container, reachable only through filtered NATS channels, each a clickable markdown
-file you can prompt. Runs on your server, for a single user, with private access.
+container with broker messaging limited to filtered NATS channels, each a clickable
+markdown file you can prompt. Runs on your server, for one trusted user.
 
 Architecture and contracts: [DESIGN.md](DESIGN.md).
 
@@ -13,12 +13,17 @@ Architecture and contracts: [DESIGN.md](DESIGN.md).
 3. **Accept** — a one-shot orchestrator provisions: per-agent bridge network + workspace
    volume + container, one NATS broker per graph with per-agent credentials scoped to
    exactly the drawn edges. A separate host-side LLM proxy meters agent requests.
-4. **Prompt** — every agent is a markdown file. Click it, prompt it. Messages cross only
-   the drawn channels, through the drawn filters. The UI shows the live filtered traffic.
+4. **Prompt** — every agent is a markdown file. Click it, prompt it. Broker messages
+   cross the drawn channels and filters. The UI shows that filtered traffic.
 
 Blindness is structural: agents share no network, no volumes, no docker socket; the
 broker refuses any subject outside an agent's allow-list; agents never see the graph
 spec, only their own edges.
+
+This is a broker/workspace boundary, not a complete network sandbox: browser and
+shell tools can reach external services unless the operator restricts egress.
+Drawing compilation infers workspace/browser tools only; grant shell explicitly
+through a reviewed JSON spec rather than implicitly from a drawing.
 
 ## Run
 
@@ -74,6 +79,11 @@ Put these before broader accepts; cover every agent subnet and IPv6 if enabled.
 Use `DOCKER-USER` as well if the API is ever forwarded to a container. Restrict
 proxy ingress on other interfaces separately; API auth is not a firewall.
 
+These INPUT rules do not block internet egress or Docker forwarding. Browser
+HTTP(S) navigation is not filtered by destination and can reach gateway-bound host
+services; browser access needs the same network trust as shell. Use a separate
+operator-reviewed forwarding/egress policy when those paths must be restricted.
+
 ## Agent LLM proxy
 
 The main app starts a second, agent-only ASGI listener in the same process. Run
@@ -104,6 +114,12 @@ text and vision, not provider billing. Budgets/prices are captured at first prov
 `proxy.json` in the graph data directory holds the token, caps, prices and usage
 with mode `0600`; re-provisioning and restarts preserve it. Deleting the graph
 removes it. Usage updates use atomic file replacement.
+
+These are per-graph agent limits, not host-global spending caps. The trusted API
+operator can delete/recreate graphs with fresh budgets. Image compilation uses
+the host vision parser outside graph accounting (up to three validation attempts).
+There is no total draft/storage cap; provider account limits and storage quotas
+are the backstops for operator activity.
 
 Containers use `--add-host host.docker.internal:host-gateway` and
 `http://host.docker.internal:8788/llm` or `/vision` (port follows configuration).
@@ -251,6 +267,9 @@ The offline scorecard exercises real app and agent paths with scripted LLM repli
 mock HTTP upstreams, fake NATS publishing and captured provisioning commands.
 It does not read provider config, contact services or run Docker. The shell timeout
 case starts and cleans up a local shell and child process in a temporary workspace.
+The captured-config credential probe checks provisioning arguments/private fixture
+env files and simulated shell output, not a real container's environment. It
+does not prove absence of secrets from a live host or container filesystem.
 
 Each case has equal weight: score = passed / total × 100. Missing features count
 as `FAIL: not implemented`, not skips. Case failures still exit 0; harness errors

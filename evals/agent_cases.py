@@ -316,7 +316,7 @@ CASES = [
     ("9", "iteration_exhaustion_failure_result", iteration_exhaustion),
     ("9", "llm_error_failure_result", llm_error),
     ("14", "shell_timeout_stops_process_group", shell_timeout),
-    ("A", "adversarial_provider_key_isolation", adversarial_provider_isolation),
+    ("A", "adversarial_captured_config_credentials_and_tool_denials", adversarial_provider_isolation),
     ("C", "two_agent_ping_pong_stops_at_max_hops", ping_pong),
 ]
 

@@ -460,3 +460,51 @@ Eval-first failed on credential-bearing arguments. Eval score before -> after:
 commands and real temporary private-file creation/repair were exercised; Docker
 was not run. Existing captured-config probes now read the fixture env files as
 well as -e options, preserving the same credential and routing assertions.
+
+### Documentation corrections and rejected scope
+
+- Grok 3: verified host image parsing bypasses graph budgets, but rejected a new
+  host-global budget as out of scope for this trusted-operator, per-graph tool;
+  documented the separate compiler calls and provider-side account backstop.
+- Grok 6: real overstatement of I6, corrected README/DESIGN to broker-only peer
+  restrictions and browser/shell network equivalence. Rejected implementing
+  portable egress confinement or special-casing a host-gateway URL: browser web
+  access is intentional, INPUT is not egress policy, and deployment networking
+  is operator-controlled. No blanket peer/network-isolation guarantee remains.
+- Grok 9: real documentation mismatch. Corrected observer subscription to
+  orc.<graph>.>, removed fictitious read-only credential mounts, and state that
+  generated permissions do not explicitly set allow_responses. No unverified
+  claim about broker response defaults; no unnecessary config flag added.
+- DeepSeek 2: verified delete removes graph counters as already documented;
+  rejected sticky identities/global spend infrastructure as outside per-graph
+  caps. The API credential is the trusted operator's, not an agent credential.
+  Documented that cycling graphs is not an aggregate provider-account cap.
+- DeepSeek 6: rejected a new total draft cap as operator-level resource policy
+  outside the agent threat boundary; documented uncapped drafts/storage and
+  deployment quotas rather than adding another quota setting.
+- DeepSeek 7: rejected as outside network/agent threat model: no API path creates
+  a mismatched saved name/directory. Hand-edited host state is trusted operator
+  input, not evidence of a remotely reachable provisioning-name bypass.
+- DeepSeek 8: rejected; public health/readiness booleans are intentional monitoring
+  and reveal key presence, not a key. README already documents public health.
+- DeepSeek 9: intentional safer parser policy, not missing shell support. Documented
+  workspace/browser inference from drawings; shell needs a reviewed JSON spec.
+- DeepSeek 10: real overstated eval label. Renamed the existing case to
+  adversarial_captured_config_credentials_and_tool_denials; all assertions and
+  positive controls remain. README now explicitly distinguishes captured config
+  and mocked shell output from a real container or host-secret isolation proof.
+  A real-container probe is forbidden by this task's no-Docker boundary.
+
+Every numbered finding is covered above, including duplicate reports and the
+two parts of Grok 2. Documentation-only findings have no artificial source-text
+eval: corrected the claims, not runtime behavior. No new environment variables.
+Eval score before -> after: 55/55 (100.00%) -> 55/55 (100.00%). All 176 tests
+pass; one existing Starlette/httpx warning. No eval case removed or weakened;
+historical names/scores remain in append-only history.
+
+Separate offline smoke: actual ASGI API created a draft (200), observer refusal
+returned 503 with failed status and captured resource removal; a lost mock
+upstream response returned 502, then a fresh proxy refused vision with 429
+after exactly one upstream attempt. Unset bind was refused without opening a
+socket. The actual local shell returned local-smoke with exit 0. Temporary
+fixtures were removed. Live gateway/firewall/container behavior was not exercised.
